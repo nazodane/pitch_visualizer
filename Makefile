@@ -1,0 +1,56 @@
+# コンパイラ
+CXX = g++
+# コンパイルフラグ
+CXXFLAGS = -I/usr/include/spa-0.2/ -I/usr/include/pipewire-0.3/ -Wall -Wextra -O2
+# リンクするライブラリ
+LDFLAGS = -lglfw -lGLEW -lGL -lpipewire-0.3 -lcap
+# 出力ファイル名
+TARGET = pitch_vizualizer
+# ソースファイル
+SRC = src/pitch_vizualizer.cpp
+# インストールディレクトリ
+DESTDIR = /usr/local/bin
+# インストール先
+INSTALL_PATH = $(DESTDIR)/$(TARGET)
+
+PACKAGE_NAME = pitch-vizualizer
+VERSION = 1.0
+
+SOURCE_DIR = .
+TARBALL = ../$(PACKAGE_NAME)_$(VERSION).orig.tar.gz
+DEB_DIR = debian
+
+# ビルドルール
+all: $(TARGET)
+
+# コンパイルターゲット
+$(TARGET): $(SRC) src/lag_to_y.h
+	$(CXX) $(CXXFLAGS) $(SRC) $(LDFLAGS) -o $(TARGET)
+
+src/lag_to_y.h: gen_table
+	./gen_table > src/lag_to_y.h
+
+gen_table: src/gen_table.cpp
+	$(CXX) $(CXXFLAGS) src/gen_table.cpp $(LDFLAGS) -o gen_table
+
+# インストールターゲット
+install: $(TARGET)
+	cp $(TARGET) $(DESTDIR)
+	setcap 'cap_sys_nice=eip' $(INSTALL_PATH)
+
+# アンインストールターゲット
+uninstall:
+	rm -f $(INSTALL_PATH)
+
+# クリーンアップ
+clean:
+	rm -f $(TARGET) src/lag_to_y.h gen_table
+
+deb: tarball
+	debuild -b
+
+tarball:
+	tar czf $(TARBALL) $(wildcard src/*.cpp) $(wildcard src/*.h) $(wildcard Makefile) $(wildcard README.md)
+
+.PHONY: all install uninstall clean tarball deb
+

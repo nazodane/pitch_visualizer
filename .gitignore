@@ -1,0 +1,7 @@
+pitch_vizualizer
+debian/debhelper-build-stamp
+debian/files
+debian/pitch-vizualizer.substvars
+debian/pitch-vizualizer
+**~
+debian/.debhelper

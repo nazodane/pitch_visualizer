@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+%:
+	dh $@
+
+# Build the package using the 'make' command
+build:
+	dh build
+	$(MAKE) 
+
+# Install the package files using the 'make install' command
+install:
+	dh install
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/pitch-vizualizer
+
+# Clean up after the build process
+clean:
+	dh clean

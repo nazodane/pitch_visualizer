@@ -1,0 +1,13 @@
+Source: pitch-vizualizer
+Section: utils
+Priority: optional
+Maintainer: Toshimitsu Kimura <lovesyao@gmail.com>
+Build-Depends: debhelper (>= 12), g++-13, libglew-dev, libpipewire-0.3-dev, libcap-dev, libboost-all-dev
+Standards-Version: 4.5.0
+Homepage: https://example.com/pitch_vizualizer
+
+Package: pitch-vizualizer
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libglfw3
+Description: A pitch visualizer application
+ A simple pitch visualizer application.

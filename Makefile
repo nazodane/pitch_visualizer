@@ -8,10 +8,14 @@ LDFLAGS = -lglfw -lGLEW -lGL -lpipewire-0.3 -lcap
 TARGET = pitch_visualizer
 # ソースファイル
 SRC = src/pitch_visualizer.cpp
+# インストールディレクトリのルート
+DESTDIR = 
+# インストールディレクトリのプリフィックス
+PREFIX = /usr/local
 # インストールディレクトリ
-DESTDIR = /usr/local/bin
+INSTALL_DIR = $(DESTDIR)$(PREFIX)/bin
 # インストール先
-INSTALL_PATH = $(DESTDIR)/$(TARGET)
+INSTALL_PATH = $(INSTALL_DIR)/$(TARGET)
 # ビルドディレクトリ
 BUILDDIR = .
 
@@ -37,7 +41,8 @@ $(BUILDDIR)/gen_table: src/gen_table.cpp
 
 # インストールターゲット
 install: $(BUILDDIR)/$(TARGET)
-	cp $(BUILDDIR)/$(TARGET) $(DESTDIR)
+	mkdir -p $(INSTALL_DIR)
+	cp $(BUILDDIR)/$(TARGET) $(INSTALL_DIR)
 	setcap 'cap_sys_nice=eip' $(INSTALL_PATH)
 
 # アンインストールターゲット

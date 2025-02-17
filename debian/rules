@@ -13,8 +13,8 @@ build:
 
 # Install the package files using the 'make install' command
 install:
-	dh install
-	$(MAKE) install DESTDIR=$(CURDIR)/debian/pitch-visualizer
+#	dh install
+	$(MAKE) install PREFIX=/usr DESTDIR=$(CURDIR)/debian/pitch-visualizer
 
 # Clean up after the build process
 clean:

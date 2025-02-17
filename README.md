@@ -2,14 +2,14 @@
 Simple vocal pitch visualizer
 
 ## Install
-Ubuntu package (planned)
+Ubuntu package: https://github.com/nazodane/pitch_visualizer/releases
 
 # Usage
 ```sh
 pitch_visualizer
 ```
-F11 key: Fullscreen toggle
-ESC key: Close
+* F11 key: Fullscreen toggle
+* ESC key: Close
 
 ## Build
 ```sh

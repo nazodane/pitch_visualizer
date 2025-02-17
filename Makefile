@@ -12,6 +12,8 @@ SRC = src/pitch_vizualizer.cpp
 DESTDIR = /usr/local/bin
 # インストール先
 INSTALL_PATH = $(DESTDIR)/$(TARGET)
+# ビルドディレクトリ
+BUILDDIR = .
 
 PACKAGE_NAME = pitch-vizualizer
 VERSION = 1.0
@@ -24,18 +26,18 @@ DEB_DIR = debian
 all: $(TARGET)
 
 # コンパイルターゲット
-$(TARGET): $(SRC) src/lag_to_y.h
-	$(CXX) $(CXXFLAGS) $(SRC) $(LDFLAGS) -o $(TARGET)
+$(BUILDDIR)/$(TARGET): $(SRC) src/lag_to_y.h
+	$(CXX) $(CXXFLAGS) $(SRC) $(LDFLAGS) -o $(BUILDDIR)/$(TARGET)
 
 src/lag_to_y.h: gen_table
-	./gen_table > src/lag_to_y.h
+	$(BUILDDIR)/gen_table > src/lag_to_y.h
 
-gen_table: src/gen_table.cpp
-	$(CXX) $(CXXFLAGS) src/gen_table.cpp $(LDFLAGS) -o gen_table
+$(BUILDDIR)/gen_table: src/gen_table.cpp
+	$(CXX) $(CXXFLAGS) src/gen_table.cpp $(LDFLAGS) -o $(BUILDDIR)/gen_table
 
 # インストールターゲット
-install: $(TARGET)
-	cp $(TARGET) $(DESTDIR)
+install: $(BUILDDIR)/$(TARGET)
+	cp $(BUILDDIR)/$(TARGET) $(DESTDIR)
 	setcap 'cap_sys_nice=eip' $(INSTALL_PATH)
 
 # アンインストールターゲット
@@ -44,9 +46,9 @@ uninstall:
 
 # クリーンアップ
 clean:
-	rm -f $(TARGET) src/lag_to_y.h gen_table
+	rm -f $(BUILDDIR)/$(TARGET) src/lag_to_y.h $(BUILDDIR)/gen_table
 
-deb: tarball
+deb: clean tarball
 	debuild -b
 
 tarball:

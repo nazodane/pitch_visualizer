@@ -5,9 +5,9 @@ CXXFLAGS = -I/usr/include/spa-0.2/ -I/usr/include/pipewire-0.3/ -Wall -Wextra -O
 # リンクするライブラリ
 LDFLAGS = -lglfw -lGLEW -lGL -lpipewire-0.3 -lcap
 # 出力ファイル名
-TARGET = pitch_vizualizer
+TARGET = pitch_visualizer
 # ソースファイル
-SRC = src/pitch_vizualizer.cpp
+SRC = src/pitch_visualizer.cpp
 # インストールディレクトリ
 DESTDIR = /usr/local/bin
 # インストール先
@@ -15,7 +15,7 @@ INSTALL_PATH = $(DESTDIR)/$(TARGET)
 # ビルドディレクトリ
 BUILDDIR = .
 
-PACKAGE_NAME = pitch-vizualizer
+PACKAGE_NAME = pitch-visualizer
 VERSION = 1.0
 
 SOURCE_DIR = .

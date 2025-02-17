@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2025 Toshimitsu Kimura <lovesyao@gmail.com>
 // SPDX-License-Identifier: LGPL-2.0-or-later
 
-// g++ pitch_vizualizer.cpp -I/usr/include/spa-0.2/ -I/usr/include/pipewire-0.3/ -lglfw -lGLEW  -lGL -lpipewire-0.3 -lcap -o pitch_vizualizer
-// sudo setcap 'cap_sys_nice=eip' ./pitch_vizualizer
+// g++ pitch_visualizer.cpp -I/usr/include/spa-0.2/ -I/usr/include/pipewire-0.3/ -lglfw -lGLEW  -lGL -lpipewire-0.3 -lcap -o pitch_visualizer
+// sudo setcap 'cap_sys_nice=eip' ./pitch_visualizer
 
 #define ENABLE_REALTIME
 

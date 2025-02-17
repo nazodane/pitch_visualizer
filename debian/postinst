@@ -1,2 +1,2 @@
 #!/bin/bash
-setcap 'cap_sys_nice=eip' /usr/bin/pitch_vizualizer
+setcap 'cap_sys_nice=eip' /usr/bin/pitch_visualizer

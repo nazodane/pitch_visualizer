@@ -1,8 +1,8 @@
-pitch_vizualizer
+pitch_visualizer
 gen_table
 debian/debhelper-build-stamp
 debian/files
-debian/pitch-vizualizer.substvars
-debian/pitch-vizualizer
+debian/pitch-visualizer.substvars
+debian/pitch-visualizer
 **~
 debian/.debhelper

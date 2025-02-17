@@ -24,6 +24,10 @@ make
 * Draw multiple lines at once
 * Realtime
 
+## Bugs
+* min_rate/max_rate != 4096 may not work properly
+
+
 ## Screenshot
 ![Screenshot of the Vocal Pitch Visualizer](screenshot.png)
 

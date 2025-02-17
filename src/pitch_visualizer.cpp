@@ -89,6 +89,7 @@ static void on_process([[maybe_unused]] void *userdata) {
 //            std::cout << "init with " << numSamples << std::endl;
         }
 */
+//        std::cout << numSamples << std::endl;
 
         size_t realLagMax = std::min(numSamples / 2, lagMax);
         ptrdiff_t prevOffset = (ptrdiff_t)previousSamplesLen - numSamples;
@@ -164,12 +165,43 @@ static void on_process([[maybe_unused]] void *userdata) {
     pw_stream_queue_buffer(stream, buffer);
 }
 
+#include <spa/param/latency-utils.h>
+
+// Pipewireのパラメータ変更を受け取るコールバック関数
+static void on_param_changed(void *data, uint32_t id, const struct spa_pod *params)
+{
+    switch (id) {
+        case SPA_PARAM_Latency: {
+            struct spa_latency_info latency;
+
+            int res = spa_latency_parse(params, &latency);
+
+            if (res < 0) {
+                fprintf(stderr, "Failed to parse latency info: %d\n", res);
+                return;
+            }
+            printf("Latency Info (for debug only) :\n");
+            printf("  min_quantum: %f\n", latency.min_quantum); // ?
+            printf("  max_quantum: %f\n", latency.max_quantum); // ?
+            printf("  min_rate: %u\n", latency.min_rate); // same as jack_latency_range_t
+            printf("  max_rate: %u\n", latency.max_rate); // ditto
+            printf("  min_ns: %lu\n", latency.min_ns); // ?
+            printf("  max_ns: %lu\n", latency.max_ns); // ?
+            break;
+        }
+        default:
+            break;
+    }
+    // TODO: check "Pro Audio profile" or not
+}
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 
 // Pipewire のストリームイベント構造体
 static const struct pw_stream_events stream_events = {
     PW_VERSION_STREAM_EVENTS,
+    .param_changed = on_param_changed,
     .process = on_process,
 };
 #pragma GCC diagnostic pop
@@ -361,7 +393,6 @@ void renderNotes(float baseFrequency, float maxDisplayPitch) {
     }
 }
 
-
 // OpenGL のレンダリングループ（x方向は時間軸、y方向はピッチ）
 void renderLoop(GLFWwindow* window) {
     size_t histIndex = 0;
@@ -514,14 +545,14 @@ int main() {
     info.format = SPA_AUDIO_FORMAT_F32;
     info.rate = (size_t)sampleRate;
     info.channels = 1;
-    
+
     // 音声フォーマットのパラメータ作成
     struct spa_pod *params = spa_format_audio_raw_build(&builder, SPA_PARAM_EnumFormat, &info);
     
     // Pipewire ストリーム生成
     g_stream = pw_stream_new_simple(
         pw_main_loop_get_loop(pw_loop),
-        "PitchDetector",
+        "Voice Pitch Visualizer",
         nullptr,       // properties
         &stream_events,
         nullptr        // user data
@@ -545,7 +576,7 @@ int main() {
         std::cerr << "Pipewire stream connection failed. exit." << std::endl;
         exit(EXIT_FAILURE);
     }
-    
+
     // Pipewire メインループを別スレッドで実行
     std::thread pipewireThread([&](){
         pw_main_loop_run(pw_loop);

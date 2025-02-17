@@ -1,4 +1,5 @@
 pitch_vizualizer
+gen_table
 debian/debhelper-build-stamp
 debian/files
 debian/pitch-vizualizer.substvars

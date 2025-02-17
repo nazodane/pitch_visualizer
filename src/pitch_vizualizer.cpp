@@ -45,8 +45,10 @@ const float baseFrequency = 55.0f; // A1 の周波数 (基準音)
 
 // 現在のピッチ（Hz）のリングバッファ
 float currentPitchRing[(size_t)sampleRate] = {0.0};
+float currentPitchRingExperiment[(size_t)sampleRate] = {0.0};
 std::atomic<size_t> currentPitchWriteIndex = 0;
 size_t currentPitchReadIndex = 0; // thread unsafe
+size_t currentPitchReadIndex2 = 0; // thread unsafe
 
 // グローバルストリームポインタ（on_process 内で使用）
 static struct pw_stream* g_stream = nullptr;
@@ -114,9 +116,11 @@ static void on_process([[maybe_unused]] void *userdata) {
                 lag_to_correlation[lag] += (double)audioData[t] * audioData[t + lag];
 
 
-/*
+            if (rmsSQ < amplitudeThreshold * amplitudeThreshold * numSamples) { // 小さい音のピッチは無視してリングバッファに-1を格納する
+                currentPitchRing[currentPitchWriteIndex] = -1;
+                currentPitchRingExperiment[currentPitchWriteIndex] = -1;
+            } else{ // 有効な音はピッチの検出を最後まで進めてリングバッファに格納する
                 float bestCorrelation = 0.0f;
-
                 size_t bestLag = lagMin;
                 size_t secondBesｔLag = lagMin;
                 size_t thirdBesｔLag = lagMin;
@@ -128,45 +132,27 @@ static void on_process([[maybe_unused]] void *userdata) {
                         bestLag = lag;
                     }
                 }
-                float prevNewPitch = newPitch;
-                float newFirstPitch = std::log2(sampleRate / bestLag);
-                float newSecondPitch = std::log2(sampleRate / secondBesｔLag);
-                float newThirdPitch = std::log2(sampleRate / thirdBesｔLag); // TODO
-                newPitch = std::abs(prevNewPitch - newFirstPitch) < abs(prevNewPitch - newSecondPitch) ? (
-                    std::abs(prevNewPitch - newFirstPitch) < abs(prevNewPitch - newThirdPitch) ? newFirstPitch : newThirdPitch
-                    ) : (
-                    std::abs(prevNewPitch - newSecondPitch) < abs(prevNewPitch - newThirdPitch) ? newSecondPitch : newThirdPitch
-                    );
-*/
-
-            if (rmsSQ < amplitudeThreshold * amplitudeThreshold * numSamples) { // 小さい音のピッチは無視してリングバッファに-1を格納する
-                currentPitchRing[currentPitchWriteIndex] = -1;
-            } else{ // 有効な音はピッチの検出を最後まで進めてリングバッファに格納する
-                float bestCorrelation = 0.0f;
-                size_t bestLag = lagMin;
-                for (size_t lag = lagMin; lag < realLagMax; lag++) { // TODO: もっと良い選び方ありそう
-                    if (bestCorrelation < lag_to_correlation[lag]) {
-                        bestCorrelation = lag_to_correlation[lag];
-                        bestLag = lag;
-                    }
-                }
                 float newPitch = lag_to_y[bestLag - lagMin]; //std::log2(bestLag);
+
+                if (std::abs(std::abs(std::log2(bestLag) - std::log2(secondBesｔLag)) - 1.0) > 0.05) // 倍音
+                    newPitch = std::min(lag_to_y[bestLag - lagMin], lag_to_y[secondBesｔLag - lagMin]);
+                if (std::abs(lag_to_y[secondBesｔLag - lagMin] - newPitch) > 0.025)
+                    newPitch = -1.0f;
+                if (std::abs(lag_to_y[thirdBesｔLag - lagMin] - newPitch) > 0.025)
+                    newPitch = -1.0f;
+                if (std::abs(lag_to_y[thirdBesｔLag - lagMin] - lag_to_y[secondBesｔLag - lagMin]) > 0.025)
+                    newPitch = -1.0f;
+
 /*
-                float prevNewPitch = newPitch;
-                size_t bestLag = lagMin;
-                for (size_t lag = lagMin; lag < realLagMax; lag++) { // TODO: もっと良い選び方ありそう
-                    float tmpPitchDiff = std::abs(prevNewPitch - std::log2(sampleRate / lag));
-                    if (bestCorrelation < lag_to_correlation[lag] / tmpPitchDiff) {
-                        bestCorrelation = lag_to_correlation[lag] / tmpPitchDiff;
-                        bestLag = lag;
-                    }
-                }
-                newPitch = std::log2(sampleRate / bestLag);
+                if (bestCorrelation / sqrt(rmsSQ) > 0.8) // 音量の割にパワー多い
+                    newPitch = -1.0f;
 */
+                currentPitchRing[currentPitchWriteIndex] = newPitch;
+                currentPitchRingExperiment[currentPitchWriteIndex] = lag_to_y[bestLag - lagMin];//std::abs(lag_to_y[secondBesｔLag- lagMin] - newPitch);
 
                 //std::cout << (std::abs(std::log2(prevNewPitch) - std::log2(newFirstPitch)) < abs(std::log2(prevNewPitch) - std::log2(newSecondPitch)))  << std::endl;
 
-                currentPitchRing[currentPitchWriteIndex] = newPitch;
+
             }
             size_t newWriteIndex = currentPitchWriteIndex.load(std::memory_order_relaxed) + 1;
             if (newWriteIndex >= (size_t)sampleRate)
@@ -192,9 +178,11 @@ static const struct pw_stream_events stream_events = {
 
 const size_t maxHistory = 10 * (size_t)sampleRate; // 表示するサンプルの数（10秒分）
 std::vector<GLfloat> vertices(maxHistory*2);
+std::vector<GLfloat> vertices2(maxHistory*2);
 std::vector<GLuint> indices(maxHistory);
+std::vector<GLuint> indices2(maxHistory);
 GLuint vao, vbo, ebo;
-GLuint shaderProgram;
+GLuint vao2, vbo2, ebo2;
 
 // 頂点シェーダー
 const char* vertexShaderSource = R"(
@@ -213,8 +201,18 @@ const char* fragmentShaderSource = R"(
         FragColor = vec4(0.0, 1.0, 0.0, 0.0);
     }
 )";
+const char* fragmentShaderSource2 = R"(
+    #version 330 core
+    out vec4 FragColor;
+    void main() {
+        FragColor = vec4(0.0, 0.0, 1zz.0, 0.0);
+    }
+)";
 
-GLuint createShaderProgram() {
+GLuint shaderProgram = 0;
+GLuint shaderProgram2 = 0;
+
+void createShaderProgram() {
     GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexShader, 1, &vertexShaderSource, nullptr);
     glCompileShader(vertexShader);
@@ -223,15 +221,23 @@ GLuint createShaderProgram() {
     glShaderSource(fragmentShader, 1, &fragmentShaderSource, nullptr);
     glCompileShader(fragmentShader);
 
-    GLuint shaderProgram = glCreateProgram();
+    GLuint fragmentShader2 = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader2, 1, &fragmentShaderSource2, nullptr);
+    glCompileShader(fragmentShader2);
+
+    shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
 
+    shaderProgram2 = glCreateProgram();
+    glAttachShader(shaderProgram, vertexShader);
+    glAttachShader(shaderProgram, fragmentShader2);
+    glLinkProgram(shaderProgram);
+
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
-
-    return shaderProgram;
+    glDeleteShader(fragmentShader2);
 }
 
 void framebuffer_size_callback([[maybe_unused]] GLFWwindow* window, int width, int height) {
@@ -293,7 +299,7 @@ void initOpenGL(GLFWwindow** window) {
     glfwSetFramebufferSizeCallback(*window, framebuffer_size_callback); // ウインドウリサイズのコールバックを登録
     glfwSetKeyCallback(*window, key_callback); // キー入力のコールバックを登録
 
-    shaderProgram = createShaderProgram();
+    createShaderProgram();
 
     glEnable(GL_PRIMITIVE_RESTART);
     glPrimitiveRestartIndex(0xFFFF);  // 使わないインデックスを設定
@@ -307,11 +313,25 @@ void initOpenGL(GLFWwindow** window) {
     // 頂点バッファ
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), vertices.data(), GL_STATIC_DRAW);
-
     // インデックスバッファ
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), indices.data(), GL_STATIC_DRAW);
+    // 頂点属性
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), (void*)0);
+    glEnableVertexAttribArray(0);
 
+
+    glGenVertexArrays(1, &vao2);
+    glGenBuffers(1, &vbo2);
+    glGenBuffers(1, &ebo2);
+
+    glBindVertexArray(vao2);
+ 
+    glBindBuffer(GL_ARRAY_BUFFER, vbo2);
+    glBufferData(GL_ARRAY_BUFFER, vertices2.size() * sizeof(GLfloat), vertices2.data(), GL_STATIC_DRAW);
+    // インデックスバッファ
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo2);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices2.size() * sizeof(GLuint), indices2.data(), GL_STATIC_DRAW);
     // 頂点属性
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), (void*)0);
     glEnableVertexAttribArray(0);
@@ -347,6 +367,7 @@ void renderNotes(float baseFrequency, float maxDisplayPitch) {
 // OpenGL のレンダリングループ（x方向は時間軸、y方向はピッチ）
 void renderLoop(GLFWwindow* window) {
     size_t histIndex = 0;
+    size_t histIndex2 = 0;
 
     while (!glfwWindowShouldClose(window)) {
 //        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
@@ -358,40 +379,58 @@ void renderLoop(GLFWwindow* window) {
         glUseProgram(0);
         // 基準線を描画
         renderNotes(baseFrequency, maxDisplayPitch); 
-   
-        GLfloat* mappedVbo = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);  // バッファをマッピングして書き込み可能にする
-        GLuint* mappedEbo = (GLuint*)glMapBuffer(GL_ELEMENT_ARRAY_BUFFER, GL_WRITE_ONLY);
 
-        mappedEbo[histIndex] = histIndex; // 前回の接続線を再接続
+        for (int i = 1; i >= 0; i--){
+            float* buf = nullptr;
+            size_t *idx = nullptr, *hidx = nullptr;
+            if (i == 0) {
+                glBindVertexArray(vao); 
+                glBindBuffer(GL_ARRAY_BUFFER, vbo);
+                /*glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);*/
+                glUseProgram(shaderProgram); glColor3f(0.0f, 1.0f, 0.0f); buf = &currentPitchRing[0]; idx = &currentPitchReadIndex; hidx = &histIndex;
+            } else {
+                glBindVertexArray(vao2);
+                glBindBuffer(GL_ARRAY_BUFFER, vbo2);
+                /*glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo2); */
+                glUseProgram(shaderProgram2);
+                glColor3f(0.0f, 0.0f, 1.0f);
+                buf = &currentPitchRingExperiment[0];
+                idx = &currentPitchReadIndex2;
+                hidx = &histIndex2;
+            }
+            GLfloat* mappedVbo = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);  // バッファをマッピングして書き込み可能にする
+            GLuint* mappedEbo = (GLuint*)glMapBuffer(GL_ELEMENT_ARRAY_BUFFER, GL_WRITE_ONLY);
 
-        while (currentPitchReadIndex != currentPitchWriteIndex) {
-            // 現在のピッチ値を取得（音量が小さい場合、-1が格納されている）
-            float pitch_y = currentPitchRing[currentPitchReadIndex];
-            currentPitchReadIndex++;
-            if (currentPitchReadIndex >= (size_t)sampleRate)
-                currentPitchReadIndex -= (size_t)sampleRate;
+            mappedEbo[*hidx] = *hidx; // 前回の接続線を再接続
 
-            // vboにx座標を入れる
-            mappedVbo[histIndex*2 + 0] = -1.0f + 2.0f * (float(histIndex) / (maxHistory - 1));
-            // vboにy座標を入れる
-            // y軸は 0Hz -> -1, maxDisplayPitch -> 1　の対数マッピング
-//            mappedVbo[histIndex*2 + 1] = pitch_log2 == -1 ? -1 : (((std::log2(sampleRate) - pitch_log2 - std::log2(baseFrequency)) / std::log2(maxDisplayPitch / baseFrequency)) * 2.0f - 1.0f);
-            mappedVbo[histIndex*2 + 1] = pitch_y == -1 ? -1 : pitch_y;
-            if (pitch_y == -1.0f) mappedEbo[histIndex] = 0xFFFF; 
-            else mappedEbo[histIndex] = histIndex;
-            histIndex++;
-            if (histIndex >= maxHistory) histIndex -= maxHistory;
-        }
+            while (*idx != currentPitchWriteIndex) {
+                // 現在のピッチ値を取得（音量が小さい場合、-1が格納されている）
+                float pitch_y = buf[*idx];
+                (*idx)++;
+                if (*idx >= (size_t)sampleRate)
+                    *idx -= (size_t)sampleRate;
 
-        mappedEbo[histIndex] = 0xFFFF; // 接続線を切る
+                // vboにx座標を入れる
+                mappedVbo[(*hidx)*2 + 0] = -1.0f + 2.0f * (float(*hidx) / (maxHistory - 1));
+                // vboにy座標を入れる
+                // y軸は 0Hz -> -1, maxDisplayPitch -> 1　の対数マッピング
+//                mappedVbo[*hidx*2 + 1] = pitch_log2 == -1 ? -1 : (((std::log2(sampleRate) - pitch_log2 - std::log2(baseFrequency)) / std::log2(maxDisplayPitch / baseFrequency)) * 2.0f - 1.0f);
+                mappedVbo[(*hidx)*2 + 1] = pitch_y == -1 ? -1 : pitch_y * 2.0f - 1.0f;
+                if (pitch_y == -1.0f) mappedEbo[*hidx] = 0xFFFF; 
+                else mappedEbo[*hidx] = *hidx;
+                (*hidx)++;
+                if (*hidx >= maxHistory) (*hidx) -= maxHistory;
+            }
 
-        glUseProgram(shaderProgram);
+            mappedEbo[*hidx] = 0xFFFF; // 接続線を切る
+
 //        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), vertices.data(), GL_STATIC_DRAW); // TODO: Use glBufferSubData
 //        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), indices.data(), GL_STATIC_DRAW); // TODO: Use glBufferSubData
-        glUnmapBuffer(GL_ARRAY_BUFFER);
-        glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+            glUnmapBuffer(GL_ARRAY_BUFFER);
+            glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
 
-        glDrawElements(GL_LINE_STRIP, indices.size(), GL_UNSIGNED_INT, 0);
+            glDrawElements(GL_LINE_STRIP, indices.size() /*indices2.size()も同じ*/, GL_UNSIGNED_INT, 0);
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -400,7 +439,11 @@ void renderLoop(GLFWwindow* window) {
     glDeleteVertexArrays(1, &vao);
     glDeleteBuffers(1, &vbo);
     glDeleteBuffers(1, &ebo);
+    glDeleteVertexArrays(1, &vao2);
+    glDeleteBuffers(1, &vbo2);
+    glDeleteBuffers(1, &ebo2);
     glDeleteProgram(shaderProgram);
+    glDeleteProgram(shaderProgram2);
 
     glfwDestroyWindow(window);
     glfwTerminate();
@@ -486,7 +529,7 @@ int main() {
         nullptr        // user data
     );
     if (!g_stream) {
-        std::cerr << "Pipewire ストリーム生成失敗" << std::endl;
+        std::cerr << "Pipewire stream generation failed. exit." << std::endl;
         exit(EXIT_FAILURE);
     }
     
@@ -501,7 +544,7 @@ int main() {
         1
     );
     if (res < 0) {
-        std::cerr << "Pipewireストリームの接続に失敗" << std::endl;
+        std::cerr << "Pipewire stream connection failed. exit." << std::endl;
         exit(EXIT_FAILURE);
     }
     

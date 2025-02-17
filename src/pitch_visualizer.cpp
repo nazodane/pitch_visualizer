@@ -134,8 +134,6 @@ static void on_process([[maybe_unused]] void *userdata) {
                 }
                 float newPitch = lag_to_y[bestLag - lagMin]; //std::log2(bestLag);
 
-                if (std::abs(std::abs(std::log2(bestLag) - std::log2(secondBesｔLag)) - 1.0) > 0.05) // 倍音
-                    newPitch = std::min(lag_to_y[bestLag - lagMin], lag_to_y[secondBesｔLag - lagMin]);
                 if (std::abs(lag_to_y[secondBesｔLag - lagMin] - newPitch) > 0.025)
                     newPitch = -1.0f;
                 if (std::abs(lag_to_y[thirdBesｔLag - lagMin] - newPitch) > 0.025)

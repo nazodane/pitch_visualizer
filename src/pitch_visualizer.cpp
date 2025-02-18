@@ -43,7 +43,7 @@ const float maxDisplayPitch = 880.000f; // A6 の周波数
 // 表示用の下限ピッチ（Hz） 
 const float baseFrequency = 55.0f; // A1 の周波数 (基準音)
 
-// 現在のピッチ（Hz）のリングバッファ
+// 現在のピッチ（Hz）の1秒分のリングバッファ
 float currentPitchRing[(size_t)sampleRate] = {0.0};
 float currentPitchRingExperiment[(size_t)sampleRate] = {0.0};
 std::atomic<size_t> currentPitchWriteIndex = 0;
@@ -56,15 +56,19 @@ static struct pw_stream* g_stream = nullptr;
 const size_t lagMin = ceil(sampleRate / maxDisplayPitch); // 54
 const size_t lagMax = floor(sampleRate / baseFrequency) + 1; // 873
 double lag_to_correlation[lagMax - lagMin] = {0.0};
+//double prev_lag_to_correlation[lagMax - lagMin] = {1.0};
 
-
-// 過去のサンプルを保持するためのバッファ
-float previousSamples[(size_t)sampleRate] = {0.0}; // 1秒分のサンプルに対応
-size_t previousSamplesLen = 0;
+// 過去のサンプルを保持するためのリングバッファ
+const size_t previousSamplesMax = lagMax + lagMax;
+float previousSamples[previousSamplesMax] = {0.0}; // 55Hzのサンプルのずらしに対応
+size_t previousSamplesRemovePos = 0;
+size_t previousSamplesAddPos = lagMax;
 
 double rmsSQ = 0.0f;
 const float amplitudeThreshold = 0.005f; // 小さな音の閾値
 float newPitch = 0.0f;
+
+size_t prevLag = 0;
 
 // ピッチを計算
 static void on_process([[maybe_unused]] void *userdata) {
@@ -85,54 +89,129 @@ static void on_process([[maybe_unused]] void *userdata) {
         size_t numSamples = size / sizeof(float);
         float* audioData = (float*)((uint8_t*)d->data + offset);
 
+
+
 /*        if (previousSamplesLen < numSamples){ // 例えばnumSamples=940と941が交互に来る
 //            std::cout << "init with " << numSamples << std::endl;
         }
 */
-//        std::cout << numSamples << std::endl;
 
-        size_t realLagMax = std::min(numSamples / 2, lagMax);
-        ptrdiff_t prevOffset = (ptrdiff_t)previousSamplesLen - numSamples;
-        for (size_t t = 0; (ptrdiff_t)t < prevOffset && t < previousSamplesLen; t++){
-            rmsSQ -= (double)previousSamples[t] * previousSamples[t];
-            for (size_t lag = lagMin; lag < realLagMax && t + lag < previousSamplesLen; lag++) {
-                lag_to_correlation[lag] -= (double)previousSamples[t] * previousSamples[t + lag];
-            }
-        }
+//        std::cout << numSamples << std::endl;
 
         // ここで t を 0 から numSamples まで繰り返してずらしながら処理する
         for (size_t t = 0; t < numSamples; t++) {
+//            std::cout << previousSamplesRemovePos << ":: " << previousSamplesAddPos << ":: " << lagMax << std::endl;
+//                assert((previousSamplesRemovePos + lagMax - previousSamplesAddPos) % lagMax == 0);
 
-            // RMS振幅の計算
-            if ((ptrdiff_t)t + prevOffset >= 0 && (ptrdiff_t)t + prevOffset < (ptrdiff_t)previousSamplesLen)
-                rmsSQ -= (double)previousSamples[t + prevOffset] * previousSamples[t + prevOffset];
-            rmsSQ += (double)audioData[t] * audioData[t];
+            previousSamples[previousSamplesAddPos] = audioData[t];
+            rmsSQ -= (double)previousSamples[previousSamplesRemovePos] * previousSamples[previousSamplesRemovePos];
+            rmsSQ += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSamplesAddPos];
 
-            // 自己相関法によるピッチ検出
-            if ((ptrdiff_t)t + prevOffset >= 0)
-                for (size_t lag = lagMin; lag < realLagMax && (ptrdiff_t)t + prevOffset + lag < previousSamplesLen; lag++)
-                    lag_to_correlation[lag] -= ((double)previousSamples[t + prevOffset] * previousSamples[t + prevOffset + lag]);
+           // RMS振幅の計算と自己相関法によるピッチ検出
+            for (size_t lag = lagMin; lag < lagMax; lag++) {
 
-            for (size_t lag = lagMin; lag < realLagMax; lag++)
-                lag_to_correlation[lag] += (double)audioData[t] * audioData[t + lag];
 
+                size_t previousSampleRemoveLagPos = previousSamplesRemovePos + previousSamplesMax - lag; // 手前方向の自己相関
+                if (previousSampleRemoveLagPos >= previousSamplesMax) previousSampleRemoveLagPos -= previousSamplesMax;
+
+                lag_to_correlation[lag - lagMin] -= (double)previousSamples[previousSamplesRemovePos] * previousSamples[previousSampleRemoveLagPos];
+
+
+/*
+                // 波長に合わせて窓幅を変える
+                size_t previousSampleRemoveOffsetPos = previousSamplesAddPos + previousSamplesMax - lag; // 手前方向の自己相関
+                if (previousSampleRemoveOffsetPos >= previousSamplesMax) previousSampleRemoveOffsetPos -= previousSamplesMax;
+
+                size_t previousSampleRemoveOffsetLagPos = previousSampleRemoveOffsetPos + previousSamplesMax - lag; // 前方向の自己相関
+                if (previousSampleRemoveOffsetLagPos >= previousSamplesMax) previousSampleRemoveOffsetLagPos -= previousSamplesMax;
+
+                lag_to_correlation[lag - lagMin] -= (double)previousSamples[previousSampleRemoveOffsetPos] * previousSamples[previousSampleRemoveOffsetLagPos];
+*/
+
+                size_t previousSampleAddLagPos = previousSamplesAddPos + previousSamplesMax - lag; // 手前方向の自己相関
+                if (previousSampleAddLagPos >= previousSamplesMax) previousSampleAddLagPos -= previousSamplesMax;
+
+                lag_to_correlation[lag - lagMin] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSampleAddLagPos];
+
+            }
+
+            previousSamplesRemovePos++;
+            if (previousSamplesRemovePos >= previousSamplesMax) previousSamplesRemovePos = 0;
+            previousSamplesAddPos++;
+            if (previousSamplesAddPos >= previousSamplesMax) previousSamplesAddPos = 0;
 
             if (rmsSQ < amplitudeThreshold * amplitudeThreshold * numSamples) { // 小さい音のピッチは無視してリングバッファに-1を格納する
                 currentPitchRing[currentPitchWriteIndex] = -1;
                 currentPitchRingExperiment[currentPitchWriteIndex] = -1;
+                prevLag = 0;
             } else{ // 有効な音はピッチの検出を最後まで進めてリングバッファに格納する
                 float bestCorrelation = 0.0f;
                 size_t bestLag = lagMin;
                 size_t secondBesｔLag = lagMin;
                 size_t thirdBesｔLag = lagMin;
-                for (size_t lag = lagMin; lag < realLagMax; lag++) { // TODO: もっと良い選び方ありそう
-                    if (bestCorrelation < lag_to_correlation[lag]) {
-                        bestCorrelation = lag_to_correlation[lag];
+
+                for (size_t lag = lagMin; lag < lagMax; lag++) { // TODO: もっと良い選び方ありそう
+                    if (bestCorrelation < lag_to_correlation[lag - lagMin]) {
+                        bestCorrelation = lag_to_correlation[lag - lagMin];
+                        bestLag = lag;
+                    }
+                }
+
+/*
+                bool found = false;
+                size_t reBestCorrelation = 0.0f;
+                for (size_t lag = lagMin; lag < lagMax; lag++) { // TODO: もっと良い選び方ありそう
+                    if (bestCorrelation * 0.9 < lag_to_correlation[lag - lagMin]) {
+                        found = true;
+                        if (reBestCorrelation < lag_to_correlation[lag - lagMin]) {
+                            reBestCorrelation = lag_to_correlation[lag - lagMin];
+                            bestLag = lag;
+                        }
+                        break;
+                    } else if (found) break;
+                }
+*/
+
+                bool found = false;
+                size_t reBestCorrelation = 0.0f;
+                for (size_t lag = prevLag; lag < lagMax; lag++) {
+                    if (bestCorrelation * 0.8 < lag_to_correlation[lag - lagMin]) {
+                        found = true;
+                        if (reBestCorrelation < lag_to_correlation[lag - lagMin]) {
+                            reBestCorrelation = lag_to_correlation[lag - lagMin];
+                            thirdBesｔLag = secondBesｔLag;
+                            secondBesｔLag = bestLag;
+                            bestLag = lag;
+                        }
+                    } else if (found) break;
+                }
+                found = false;
+                for (size_t lag = prevLag; lag >= lagMin; lag--) {
+                    if (bestCorrelation * 0.8 < lag_to_correlation[lag - lagMin]) {
+                        found = true;
+                        if (reBestCorrelation < lag_to_correlation[lag - lagMin]) {
+                            reBestCorrelation = lag_to_correlation[lag - lagMin];
+                            thirdBesｔLag = secondBesｔLag;
+                            secondBesｔLag = bestLag;
+                            bestLag = lag;
+                        }
+                    } else if (found) break;
+                }
+
+/*
+                for (size_t lag = lagMin; lag < lagMax; lag++) { // TODO: もっと良い選び方ありそう
+                    if (bestCorrelation < lag_to_correlation[lag - lagMin] * prev_lag_to_correlation[lag - lagMin]) {
+                        bestCorrelation = lag_to_correlation[lag - lagMin] * prev_lag_to_correlation[lag - lagMin];
                         thirdBesｔLag = secondBesｔLag;
                         secondBesｔLag = bestLag;
                         bestLag = lag;
                     }
+                    prev_lag_to_correlation[lag - lagMin] = lag_to_correlation[lag - lagMin];
                 }
+*/
+
+//                prevLag = bestLag;
+
                 float newPitch = lag_to_y[bestLag - lagMin]; //std::log2(bestLag);
 
                 if (std::abs(lag_to_y[secondBesｔLag - lagMin] - newPitch) > 0.025)
@@ -141,6 +220,22 @@ static void on_process([[maybe_unused]] void *userdata) {
                     newPitch = -1.0f;
                 if (std::abs(lag_to_y[thirdBesｔLag - lagMin] - lag_to_y[secondBesｔLag - lagMin]) > 0.025)
                     newPitch = -1.0f;
+
+
+/*
+                for (size_t lag = lagMin; lag < lagMax; lag++) { // TODO: もっと良い選び方ありそう
+                    if (bestCorrelation < lag_to_correlation[lag - lagMin]) {
+                        bestCorrelation = lag_to_correlation[lag - lagMin];
+                        thirdBesｔLag = secondBesｔLag;
+                        secondBesｔLag = bestLag;
+                        bestLag = lag;
+                        if (std::abs(lag_to_y[secondBesｔLag - lagMin] - lag_to_y[bestLag - lagMin]) < 0.025 &&
+                            std::abs(lag_to_y[thirdBesｔLag - lagMin] - lag_to_y[bestLag - lagMin]) < 0.025 &&
+                            std::abs(lag_to_y[thirdBesｔLag - lagMin] - lag_to_y[secondBesｔLag - lagMin]) < 0.025)
+                            newPitch = lag_to_y[bestLag - lagMin];
+                    }
+                }
+*/
 
 /*
                 if (bestCorrelation / sqrt(rmsSQ) > 0.8) // 音量の割にパワー多い
@@ -158,8 +253,6 @@ static void on_process([[maybe_unused]] void *userdata) {
                 newWriteIndex -= (size_t)sampleRate;
             currentPitchWriteIndex.store(newWriteIndex, std::memory_order_release);
         }
-        memcpy(&previousSamples[0], audioData, numSamples*sizeof(float));
-        previousSamplesLen = numSamples;
 //        assert(memcmp(&previousSamples[0], audioData, numSamples*sizeof(float)) == 0);
     }
     pw_stream_queue_buffer(stream, buffer);
@@ -168,7 +261,7 @@ static void on_process([[maybe_unused]] void *userdata) {
 #include <spa/param/latency-utils.h>
 
 // Pipewireのパラメータ変更を受け取るコールバック関数
-static void on_param_changed(void *data, uint32_t id, const struct spa_pod *params)
+static void on_param_changed([[maybe_unused]] void *data, uint32_t id, const struct spa_pod *params)
 {
     switch (id) {
         case SPA_PARAM_Latency: {
@@ -180,7 +273,7 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
                 fprintf(stderr, "Failed to parse latency info: %d\n", res);
                 return;
             }
-            printf("Latency Info (for debug only) :\n");
+            printf("Latency Info:\n");
             printf("  min_quantum: %f\n", latency.min_quantum); // ?
             printf("  max_quantum: %f\n", latency.max_quantum); // ?
             printf("  min_rate: %u\n", latency.min_rate); // same as jack_latency_range_t
@@ -495,6 +588,9 @@ bool has_cap(cap_value_t cap) {
 #endif
 
 int main() {
+    // レイテンシを短くする
+    setenv("PIPEWIRE_QUANTUM", "32/48000", true);
+
     int err = mlockall(MCL_CURRENT | MCL_FUTURE);
     if (err == 0)
         std::cout << "mlockall(MCL_CURRENT | MCL_FUTURE) is succeed!" << std::endl;

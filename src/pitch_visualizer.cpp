@@ -131,8 +131,6 @@ static void on_process([[maybe_unused]] void *userdata) {
 
                 lag_to_correlation[lag - lagMin] -= (double)previousSamples[previousSamplesRemovePos] * previousSamples[previousSampleRemoveLagPos];
 
-
-                // 波長に合わせて窓幅を変える
                 size_t previousSampleRemoveOffsetLagPos = previousSampleRemoveOffsetPos + previousSamplesMax - lag; // 前方向の自己相関
                 if (previousSampleRemoveOffsetLagPos >= previousSamplesMax) previousSampleRemoveOffsetLagPos -= previousSamplesMax;
 

@@ -63,8 +63,9 @@ double lag_to_correlation[lagMax - lagMin] = {0.0}; // lagMax幅で取った自�
 double lag_to_correlation_double[lagMax - lagMin] = {0.0}; // lagMax*2幅で取った自己相関
 
 // 過去のサンプルを保持するためのリングバッファ
-const size_t previousSamplesMax = lagMax + lagMax + lagMax;
-float previousSamples[previousSamplesMax] = {0.0}; // 55Hzのサンプルの2倍幅ずらしに対応
+const size_t previousSamplesMax = lagMax + lagMax;
+float previousSamples[previousSamplesMax] = {0.0}; // 55Hzのサンプルのずらしに対応
+double previousSamplesLowpass[lagMax - lagMin][previousSamplesMax] = {0.0}; // 上記のローパス版
 size_t previousSamplesRemovePos = 0;
 size_t previousSamplesAddPos = lagMax;
 
@@ -78,6 +79,12 @@ float newPitch = 0.0f;
 // baseFrequency を基に全音と半音を算出
 float calculateNoteFrequency(float baseFrequency, int semitoneOffset) {
     return baseFrequency * std::pow(2.0f, semitoneOffset / 12.0f);
+}
+
+static float lag_to_loudness_coff(size_t lag) {
+//    return /*3.09e-04 * */ std::pow(lag, -1.319);
+//    return (1.0 + 0.00013 * std::pow(sampleRate/lag, 1.319)); // heuristic with equal-loudness contour
+    return 1.0; //disabled
 }
 
 // ピッチを計算
@@ -117,6 +124,17 @@ static void on_process([[maybe_unused]] void *userdata) {
             rmsSQ -= (double)previousSamples[previousSamplesRemovePos] * previousSamples[previousSamplesRemovePos];
             rmsSQ += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSamplesAddPos];
 
+            for (size_t lag = lagMin; lag < lagMax; lag++) {
+                previousSamplesLowpass[lag - lagMin][previousSamplesAddPos] = 0.0;
+                for (size_t idx=0; idx <= lag; idx++) {
+                    size_t elm_idx = previousSamplesAddPos + previousSamplesMax - idx;
+                    if (elm_idx >= previousSamplesMax)
+                        elm_idx -= previousSamplesMax;
+
+                    previousSamplesLowpass[lag - lagMin][previousSamplesAddPos] += (double)previousSamples[elm_idx] * lowpassCoeff[lag - lagMin][idx];
+                }
+            }
+
            // RMS振幅の計算と自己相関法によるピッチ検出
             for (size_t lag = lagMin; lag < lagMax; lag++) {
                 size_t previousSampleRemoveOffsetPos = previousSamplesAddPos + previousSamplesMax - lagMax * 2; // 手前方向の自己相関
@@ -129,7 +147,7 @@ static void on_process([[maybe_unused]] void *userdata) {
                 size_t previousSampleRemoveLagPos = previousSamplesRemovePos + previousSamplesMax - lag; // 手前方向の自己相関
                 if (previousSampleRemoveLagPos >= previousSamplesMax) previousSampleRemoveLagPos -= previousSamplesMax;
 
-                lag_to_correlation[lag - lagMin] -= (double)previousSamples[previousSamplesRemovePos] * previousSamples[previousSampleRemoveLagPos];
+                lag_to_correlation[lag - lagMin] -= (double)previousSamplesLowpass[lag - lagMin][previousSamplesRemovePos] * previousSamplesLowpass[lag - lagMin][previousSampleRemoveLagPos];
 
                 size_t previousSampleRemoveOffsetLagPos = previousSampleRemoveOffsetPos + previousSamplesMax - lag; // 前方向の自己相関
                 if (previousSampleRemoveOffsetLagPos >= previousSamplesMax) previousSampleRemoveOffsetLagPos -= previousSamplesMax;
@@ -140,7 +158,7 @@ static void on_process([[maybe_unused]] void *userdata) {
                 size_t previousSampleAddLagPos = previousSamplesAddPos + previousSamplesMax - lag; // 手前方向の自己相関
                 if (previousSampleAddLagPos >= previousSamplesMax) previousSampleAddLagPos -= previousSamplesMax;
 
-                lag_to_correlation[lag - lagMin] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSampleAddLagPos];
+                lag_to_correlation[lag - lagMin] += (double)previousSamplesLowpass[lag - lagMin][previousSamplesAddPos] * previousSamplesLowpass[lag - lagMin][previousSampleAddLagPos];
                 lag_to_correlation_double[lag - lagMin] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSampleAddLagPos];
             }
 
@@ -160,8 +178,8 @@ static void on_process([[maybe_unused]] void *userdata) {
                 size_t thirdBesｔLag = lagMin;
 
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-                    if (bestCorrelation < lag_to_correlation[lag - lagMin]) {
-                        bestCorrelation = lag_to_correlation[lag - lagMin];
+                    if (bestCorrelation < lag_to_correlation[lag - lagMin] * lag_to_loudness_coff(lag)) {
+                        bestCorrelation = lag_to_correlation[lag - lagMin] * lag_to_loudness_coff(lag);
                         bestLag = lag;
                     }
                 }
@@ -169,10 +187,10 @@ static void on_process([[maybe_unused]] void *userdata) {
                 bool found = false;
                 size_t reBestCorrelation = 0.0f;
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-                    if (bestCorrelation * 0.8 < lag_to_correlation[lag - lagMin]) {
+                    if (bestCorrelation * 0.8 < lag_to_correlation[lag - lagMin] * lag_to_loudness_coff(lag)) {
                         found = true;
-                        if (reBestCorrelation < lag_to_correlation[lag - lagMin]) {
-                            reBestCorrelation = lag_to_correlation[lag - lagMin];
+                        if (reBestCorrelation < lag_to_correlation[lag - lagMin] * lag_to_loudness_coff(lag)) {
+                            reBestCorrelation = lag_to_correlation[lag - lagMin] * lag_to_loudness_coff(lag);
                             thirdBesｔLag = secondBesｔLag;
                             secondBesｔLag = bestLag;
                             bestLag = lag;
@@ -192,7 +210,7 @@ static void on_process([[maybe_unused]] void *userdata) {
                     newPitch = -1.0f;
 */
 
-                currentPitchRingExperiment[currentPitchWriteIndex] = newPitch;//lag_to_y[bestLag2 - lagMin];//newPitch;
+                currentPitchRing[currentPitchWriteIndex] = newPitch;//lag_to_y[bestLag2 - lagMin];//newPitch;
 
 /*
                 if (bestCorrelation / sqrt(rmsSQ) > 0.8) // 音量の割にパワー多い
@@ -236,10 +254,12 @@ static void on_process([[maybe_unused]] void *userdata) {
                 if (std::abs(lag_to_y[thirdBesｔLag - lagMin] - lag_to_y[secondBesｔLag - lagMin]) > 0.025)
                     newPitch2 = -1.0f;
 
+/*
                 if (std::abs(newPitch - newPitch2) > 0.025)
                     newPitch2 = -1.0f;
+*/
 
-                currentPitchRing[currentPitchWriteIndex] = newPitch2;
+                currentPitchRingExperiment[currentPitchWriteIndex] = newPitch2;
 
 //                prevLag = bestLag;
 

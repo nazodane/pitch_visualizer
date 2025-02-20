@@ -32,4 +32,68 @@ int main() {
 //        std::cout << mp::log2((mp::cpp_dec_float_100)12.0).str(0, std::ios_base::scientific) << std::endl;
     }
     std::cout << "};" << std::endl;
+    std::cout << std::endl;
+
+    std::cout << "float lowpassCoeff[" << lagMax-lagMin << "][" << lagMax << "] = {" << std::endl;
+    for (size_t lag = lagMin; lag < lagMax; lag++) {
+        std::cout <<  "{" << std::endl; //lowpassCoeff[lag - lagMin][idx];
+        size_t idx=0;
+
+        // minimum-phase filterにする？
+
+        // no filter
+        for (; idx < 1; idx++) {
+           double r;
+           r = 1.0;
+           std::cout << r << "," << std::endl; //lowpassCoeff[lag - lagMin][idx];
+        }
+
+/*
+        for (; idx < 2; idx++) {
+           double r;
+           r = 1.0 / 2;
+           std::cout << r << "," << std::endl; //lowpassCoeff[lag - lagMin][idx];
+        }
+*/
+
+/*
+        // Moving Average Filter (2倍幅)
+        for (; idx <= std::min(lag*2, lagMax-1); idx++) {
+           double r;
+           r = 1.0 / (std::min(lag*2, lagMax-1) + 1);
+           std::cout << r << "," << std::endl; //lowpassCoeff[lag - lagMin][idx];
+        }
+*/
+
+/*
+        // Moving Average Filter (等幅)
+        for (; idx <= lag; idx++) {
+           double r;
+           r = 1.0 / (lag + 1);
+           std::cout << r << "," << std::endl; //lowpassCoeff[lag - lagMin][idx];
+        }
+*/
+
+
+/*
+//      linear-phase filter
+        int64_t n = - (int64_t)lag/2;
+        double norm_cutoff = 2 * M_PI * (sampleRate / lag) / sampleRate;
+
+        for (; idx <= lag; idx++, n++) {
+            double r;
+            if (n == 0)
+                r = norm_cutoff / M_PI;
+            else
+                r = sin(norm_cutoff * n) / (M_PI * n);
+           std::cout << r << "," << std::endl; //lowpassCoeff[lag - lagMin][idx];
+        }
+*/
+        for (; idx < lagMax; idx++) {
+            std::cout <<  "0.0f" << "," << std::endl;
+        }
+        std::cout <<  "}," << std::endl;
+    }
+    std::cout << "};" << std::endl;
+    std::cout << std::endl;
 }

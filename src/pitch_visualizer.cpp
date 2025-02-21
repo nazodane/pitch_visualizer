@@ -177,24 +177,45 @@ static void on_process([[maybe_unused]] void *userdata) {
                         bestLag = lag;
                     }
                 }
+                currentPitchRingExperiment[currentPitchWriteIndex] = lag_to_y[bestLag - lagMin];;
+
                 bool found = false;
-                size_t reBestCorrelation = 0.0f;
-/*
+                float reBestCorrelation = FLT_MAX, accurateBestCorration = FLT_MAX;
+                newPitch = 0.0;
+                size_t reBestLag = 0;
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-                    if (bestCorrelation * 0.8 < lag_to_correlation[lag - lagMin]) ) {
+
+                    if (/*bestCorrelation * 1.1 > lag_to_correlation[lag - lagMin]*/
+                        lag_to_correlation[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1)) <= 0.1) {
                         found = true;
-                        if (reBestCorrelation < lag_to_correlation[lag - lagMin]) {
-                            reBestCorrelation = lag_to_correlation[lag - lagMin];
-                            thirdBesｔLag = secondBesｔLag;
-                            secondBesｔLag = bestLag;
+                        if (reBestCorrelation > lag_to_correlation[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1))) {
+                            reBestCorrelation = lag_to_correlation[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1));
                             bestLag = lag;
                         }
-                    } else if (found) break;
+                    } else if (found) {
+                        if (bestLag-1 >= lagMin && bestLag+1 < lagMax) {
+                             // 二次曲線による補間
+                             // x = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1])
+                            // y = y[0] - (4*y[1] - 3*y[0] - y[2])**2 / 8*(y[2]+y[0]-2*y[1])
+                            double y0 = lag_to_correlation[bestLag - lagMin - 1] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1)),
+                                   y1 = lag_to_correlation[bestLag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1)),
+                                   y2 = lag_to_correlation[bestLag - lagMin + 1] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1));
+                            float tAccurateBestCorration = y0 - sqr(4*y1 - 3*y0 - y2) / (8*(y2+y0-2*y1));
+
+                            if (accurateBestCorration > tAccurateBestCorration) {
+                                accurateBestCorration = tAccurateBestCorration;
+                                reBestLag = bestLag; // 横着
+//                                float tNewLag = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1]);
+//                                newPitch = LAG_TO_PITCH(tNewLag);
+                            }
+                        }
+                        found = false;
+                        reBestCorrelation = FLT_MAX;
+                    }
                 }
-*/
 
 
-                newPitch = lag_to_y[bestLag - lagMin]; //std::log2(bestLag);
+                newPitch = lag_to_y[reBestLag - lagMin]; //std::log2(bestLag);
 
 /*
                 if (std::abs(lag_to_y[secondBesｔLag - lagMin] - newPitch) > 0.025)
@@ -212,7 +233,7 @@ static void on_process([[maybe_unused]] void *userdata) {
                     newPitch = -1.0f;
 */
 
-
+/*
                 bestCorrelation = 0.0f;
                 bestLag = 0;
                 secondBesｔLag = lagMin;
@@ -253,6 +274,7 @@ static void on_process([[maybe_unused]] void *userdata) {
                     newPitch2 = -1.0f;
 
                 currentPitchRingExperiment[currentPitchWriteIndex] = newPitch2;
+*/
 
 //                prevLag = bestLag;
 

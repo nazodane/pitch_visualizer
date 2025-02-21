@@ -43,6 +43,7 @@ const float sampleRate = 48000.0f;
 
 // 表示用の上限ピッチ（Hz） 
 const float maxDisplayPitch = 880.000f; // A6 の周波数
+// const float maxDisplayPitch = 48000.f;// オリジナルのYIN?
 
 // 表示用の下限ピッチ（Hz） 
 const float baseFrequency = 55.0f; // A1 の周波数 (基準音)
@@ -187,28 +188,28 @@ static void on_process([[maybe_unused]] void *userdata) {
                 bool found = false;
                 float reBestCorrelation = FLT_MAX, accurateBestCorration = FLT_MAX;
                 newPitch = 0.0;
-                size_t reBestLag = 0;
+                size_t reBestLag =0, newBestLag = 0;
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
 
                     if (dd[lag - lagMin] <= 0.1) {
                         found = true;
                         if (reBestCorrelation > dd[lag - lagMin]) {
                             reBestCorrelation = dd[lag - lagMin];
-                            bestLag = lag;
+                            reBestLag = lag;
                         }
                     } else if (found) {
-                        if (bestLag-1 >= lagMin && bestLag+1 < lagMax) {
-                             // 二次曲線による補間
-                             // x = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1])
+                        if (reBestLag-1 >= lagMin && reBestLag+1 < lagMax) {
+                            // 二次曲線による補間
+                            // x = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1])
                             // y = y[0] - (4*y[1] - 3*y[0] - y[2])**2 / 8*(y[2]+y[0]-2*y[1])
-                            double y0 = dd[bestLag - lagMin - 1],
-                                   y1 = dd[bestLag - lagMin],
-                                   y2 = dd[bestLag - lagMin + 1];
+                            double y0 = dd[reBestLag - lagMin - 1],
+                                   y1 = dd[reBestLag - lagMin],
+                                   y2 = dd[reBestLag - lagMin + 1];
                             float tAccurateBestCorration = y0 - sqr(4*y1 - 3*y0 - y2) / (8*(y2+y0-2*y1));
 
                             if (accurateBestCorration > tAccurateBestCorration) {
                                 accurateBestCorration = tAccurateBestCorration;
-                                reBestLag = bestLag; // 横着
+                                newBestLag = bestLag; // 横着
 //                                float tNewLag = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1]);
 //                                newPitch = LAG_TO_PITCH(tNewLag);
                             }
@@ -219,7 +220,7 @@ static void on_process([[maybe_unused]] void *userdata) {
                 }
 
 
-                newPitch = lag_to_y[reBestLag - lagMin]; //std::log2(bestLag);
+                newPitch = lag_to_y[newBestLag - lagMin]; //std::log2(bestLag);
 
 /*
                 if (std::abs(lag_to_y[secondBesｔLag - lagMin] - newPitch) > 0.025)

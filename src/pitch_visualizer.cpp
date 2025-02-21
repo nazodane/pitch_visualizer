@@ -59,8 +59,8 @@ static struct pw_stream* g_stream = nullptr;
 
 const size_t lagMin = ceil(sampleRate / maxDisplayPitch); // 54
 const size_t lagMax = floor(sampleRate / baseFrequency) + 1; // 873
-double lag_to_correlation[lagMax - lagMin] = {0.0}; // lagMax幅で取った自己相関
-double lag_to_correlation_double[lagMax - lagMin] = {0.0}; // lagMax*2幅で取った自己相関
+double lag_to_rss[lagMax - lagMin] = {0.0}; // lagMax幅で取った残差平方和
+double lag_to_rss_double[lagMax - lagMin] = {0.0}; // lagMax*2幅で取った残差平方和
 
 // 過去のサンプルを保持するためのリングバッファ
 const size_t previousSamplesMax = lagMax + lagMax + lagMax;
@@ -139,21 +139,21 @@ static void on_process([[maybe_unused]] void *userdata) {
                 size_t previousSampleRemoveLagPos = previousSamplesRemovePos + previousSamplesMax - lag; // 手前方向の自己相関
                 if (previousSampleRemoveLagPos >= previousSamplesMax) previousSampleRemoveLagPos -= previousSamplesMax;
 
-                lag_to_correlation[lag - lagMin] -= sqr((double)previousSamples[previousSamplesRemovePos] - previousSamples[previousSampleRemoveLagPos]);
+                lag_to_rss[lag - lagMin] -= sqr((double)previousSamples[previousSamplesRemovePos] - previousSamples[previousSampleRemoveLagPos]);
 
                 size_t previousSampleRemoveOffsetLagPos = previousSampleRemoveOffsetPos + previousSamplesMax - lag; // 前方向の自己相関
                 if (previousSampleRemoveOffsetLagPos >= previousSamplesMax) previousSampleRemoveOffsetLagPos -= previousSamplesMax;
 
-                lag_to_correlation_double[lag - lagMin] -= sqr((double)previousSamples[previousSampleRemoveOffsetPos] - previousSamples[previousSampleRemoveOffsetLagPos]);
+                lag_to_rss_double[lag - lagMin] -= sqr((double)previousSamples[previousSampleRemoveOffsetPos] - previousSamples[previousSampleRemoveOffsetLagPos]);
 
 
                 size_t previousSampleAddLagPos = previousSamplesAddPos + previousSamplesMax - lag; // 手前方向の自己相関
                 if (previousSampleAddLagPos >= previousSamplesMax) previousSampleAddLagPos -= previousSamplesMax;
 
-                lag_to_correlation[lag - lagMin] += sqr((double)previousSamples[previousSamplesAddPos] - previousSamples[previousSampleAddLagPos]);
-                lag_to_sum[lag - lagMin + 1] = lag_to_sum[lag - lagMin] + lag_to_correlation[lag - lagMin];
+                lag_to_rss[lag - lagMin] += sqr((double)previousSamples[previousSamplesAddPos] - previousSamples[previousSampleAddLagPos]);
+                lag_to_sum[lag - lagMin + 1] = lag_to_sum[lag - lagMin] + lag_to_rss[lag - lagMin];
 
-                lag_to_correlation_double[lag - lagMin] += sqr((double)previousSamples[previousSamplesAddPos] - previousSamples[previousSampleAddLagPos]);
+                lag_to_rss_double[lag - lagMin] += sqr((double)previousSamples[previousSamplesAddPos] - previousSamples[previousSampleAddLagPos]);
             }
 
             previousSamplesRemovePos++;
@@ -171,9 +171,14 @@ static void on_process([[maybe_unused]] void *userdata) {
                 size_t secondBesｔLag = lagMin;
                 size_t thirdBesｔLag = lagMin;
 
+                double dd[lagMax - lagMin] = {0.0};
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-                    if (bestCorrelation > lag_to_correlation[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1))) {
-                        bestCorrelation = lag_to_correlation[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1));
+                    dd[lag - lagMin] = lag_to_rss[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1));
+                }
+
+                for (size_t lag = lagMin; lag < lagMax; lag++) {
+                    if (bestCorrelation > dd[lag - lagMin]) {
+                        bestCorrelation = dd[lag - lagMin];
                         bestLag = lag;
                     }
                 }
@@ -185,11 +190,10 @@ static void on_process([[maybe_unused]] void *userdata) {
                 size_t reBestLag = 0;
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
 
-                    if (/*bestCorrelation * 1.1 > lag_to_correlation[lag - lagMin]*/
-                        lag_to_correlation[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1)) <= 0.1) {
+                    if (dd[lag - lagMin] <= 0.1) {
                         found = true;
-                        if (reBestCorrelation > lag_to_correlation[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1))) {
-                            reBestCorrelation = lag_to_correlation[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1));
+                        if (reBestCorrelation > dd[lag - lagMin]) {
+                            reBestCorrelation = dd[lag - lagMin];
                             bestLag = lag;
                         }
                     } else if (found) {
@@ -197,9 +201,9 @@ static void on_process([[maybe_unused]] void *userdata) {
                              // 二次曲線による補間
                              // x = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1])
                             // y = y[0] - (4*y[1] - 3*y[0] - y[2])**2 / 8*(y[2]+y[0]-2*y[1])
-                            double y0 = lag_to_correlation[bestLag - lagMin - 1] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1)),
-                                   y1 = lag_to_correlation[bestLag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1)),
-                                   y2 = lag_to_correlation[bestLag - lagMin + 1] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1));
+                            double y0 = dd[bestLag - lagMin - 1],
+                                   y1 = dd[bestLag - lagMin],
+                                   y2 = dd[bestLag - lagMin + 1];
                             float tAccurateBestCorration = y0 - sqr(4*y1 - 3*y0 - y2) / (8*(y2+y0-2*y1));
 
                             if (accurateBestCorration > tAccurateBestCorration) {
@@ -240,8 +244,8 @@ static void on_process([[maybe_unused]] void *userdata) {
                 thirdBesｔLag = lagMin;
 
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-                    if (bestCorrelation < lag_to_correlation_double[lag - lagMin]) {
-                        bestCorrelation = lag_to_correlation_double[lag - lagMin];
+                    if (bestCorrelation < lag_to_rss_double[lag - lagMin]) {
+                        bestCorrelation = lag_to_rss_double[lag - lagMin];
                         bestLag = lag;
                     }
                 }
@@ -249,10 +253,10 @@ static void on_process([[maybe_unused]] void *userdata) {
                 found = false;
                 reBestCorrelation = 0.0f;
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-                    if (bestCorrelation * 0.8 < lag_to_correlation_double[lag - lagMin]) {
+                    if (bestCorrelation * 0.8 < lag_to_rss_double[lag - lagMin]) {
                         found = true;
-                        if (reBestCorrelation < lag_to_correlation_double[lag - lagMin]) {
-                            reBestCorrelation = lag_to_correlation_double[lag - lagMin];
+                        if (reBestCorrelation < lag_to_rss_double[lag - lagMin]) {
+                            reBestCorrelation = lag_to_rss_double[lag - lagMin];
                             thirdBesｔLag = secondBesｔLag;
                             secondBesｔLag = bestLag;
                             bestLag = lag;

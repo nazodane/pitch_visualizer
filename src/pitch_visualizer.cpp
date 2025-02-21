@@ -209,7 +209,7 @@ static void on_process([[maybe_unused]] void *userdata) {
 
                             if (accurateBestCorration > tAccurateBestCorration) {
                                 accurateBestCorration = tAccurateBestCorration;
-                                newBestLag = bestLag; // 横着
+                                newBestLag = reBestLag; // 横着
 //                                float tNewLag = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1]);
 //                                newPitch = LAG_TO_PITCH(tNewLag);
                             }

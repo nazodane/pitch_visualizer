@@ -67,7 +67,8 @@ double lag_to_rss_double[lagMax - lagMin] = {0.0}; // lagMax*2幅で取った残
 const size_t previousSamplesMax = lagMax + lagMax + lagMax;
 float previousSamples[previousSamplesMax] = {0.0}; // 55Hzのサンプルの2倍幅ずらしに対応
 size_t previousSamplesRemovePos = 0;
-size_t previousSamplesAddPos = lagMax;
+size_t previousSamplesAddPos = ceil(sampleRate / 1000 * 25); // 25ms //XXX: 元論文と異なり前方のみ
+// size_t previousSamplesAddPos = lagMax;
 
 double rmsSQ = 0.0f;
 // double rmsSQ[lagMax - lagMin] = {0.0f};

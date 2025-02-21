@@ -20,7 +20,7 @@ INSTALL_PATH = $(INSTALL_DIR)/$(TARGET)
 BUILDDIR = .
 
 PACKAGE_NAME = pitch-visualizer
-VERSION = 1.1
+VERSION = 1.2
 
 SOURCE_DIR = .
 TARBALL = ../$(PACKAGE_NAME)_$(VERSION).orig.tar.gz

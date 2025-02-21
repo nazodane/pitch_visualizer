@@ -65,8 +65,9 @@ double lag_to_correlation_double[lagMax - lagMin] = {0.0}; // lagMax*2幅で取�
 // 過去のサンプルを保持するためのリングバッファ
 const size_t previousSamplesMax = lagMax + lagMax + lagMax;
 float previousSamples[previousSamplesMax] = {0.0}; // 55Hzのサンプルの2倍幅ずらしに対応
-size_t previousSamplesRemovePos = 0;
-size_t previousSamplesAddPos = lagMax;
+size_t previousSamplesDoubleRemovePos = 0;
+size_t previousSamplesRemovePos = lagMax;
+size_t previousSamplesAddPos = lagMax + lagMax;
 
 double rmsSQ = 0.0f;
 // double rmsSQ[lagMax - lagMin] = {0.0f};
@@ -122,33 +123,32 @@ static void on_process([[maybe_unused]] void *userdata) {
             rmsSQ -= (double)previousSamples[previousSamplesRemovePos] * previousSamples[previousSamplesRemovePos];
             rmsSQ += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSamplesAddPos];
 
-           // RMS振幅の計算と自己相関法によるピッチ検出
-            for (size_t lag = lagMin; lag < lagMax; lag++) {
-                size_t previousSampleRemoveOffsetPos = previousSamplesAddPos + previousSamplesMax - lagMax * 2; // 手前方向の自己相関
-                if (previousSampleRemoveOffsetPos >= previousSamplesMax) previousSampleRemoveOffsetPos -= previousSamplesMax;
-/*
-                rmsSQ[lag - lagMin] -= (double)previousSamples[previousSampleRemoveOffsetPos] * previousSamples[previousSampleRemoveOffsetPos];
-                rmsSQ[lag - lagMin] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSamplesAddPos];
-*/
+            size_t previousSampleRemoveLagPos = previousSamplesRemovePos + previousSamplesMax - lagMin;
+            if (previousSampleRemoveLagPos >= previousSamplesMax) previousSampleRemoveLagPos -= previousSamplesMax;
+            size_t previousSampleRemoveDoubleLagPos = previousSamplesDoubleRemovePos + previousSamplesMax - lagMin;
+            if (previousSampleRemoveDoubleLagPos >= previousSamplesMax) previousSampleRemoveDoubleLagPos -= previousSamplesMax;
+            size_t previousSampleAddLagPos = previousSamplesAddPos + previousSamplesMax - lagMin;
+            if (previousSampleAddLagPos >= previousSamplesMax) previousSampleAddLagPos -= previousSamplesMax;
 
-                size_t previousSampleRemoveLagPos = previousSamplesRemovePos + previousSamplesMax - lag; // 手前方向の自己相関
-                if (previousSampleRemoveLagPos >= previousSamplesMax) previousSampleRemoveLagPos -= previousSamplesMax;
+            // RMS振幅の計算と自己相関法によるピッチ検出
+//            for (size_t lag = lagMin; lag < lagMax; lag++) {
+            for (size_t idx = 0; idx < lagMax-lagMin; idx++) {
+                lag_to_correlation[/*lag - lagMin*/idx] -= (double)previousSamples[previousSamplesRemovePos] * previousSamples[previousSampleRemoveLagPos];
+                lag_to_correlation_double[/*lag - lagMin*/idx] -= (double)previousSamples[previousSamplesDoubleRemovePos] * previousSamples[previousSampleRemoveDoubleLagPos];
 
-                lag_to_correlation[lag - lagMin] -= (double)previousSamples[previousSamplesRemovePos] * previousSamples[previousSampleRemoveLagPos];
+                lag_to_correlation[/*lag - lagMin*/idx] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSampleAddLagPos];
+                lag_to_correlation_double[/*lag - lagMin*/idx] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSampleAddLagPos];
 
-                size_t previousSampleRemoveOffsetLagPos = previousSampleRemoveOffsetPos + previousSamplesMax - lag; // 前方向の自己相関
-                if (previousSampleRemoveOffsetLagPos >= previousSamplesMax) previousSampleRemoveOffsetLagPos -= previousSamplesMax;
-
-                lag_to_correlation_double[lag - lagMin] -= (double)previousSamples[previousSampleRemoveOffsetPos] * previousSamples[previousSampleRemoveOffsetLagPos];
-
-
-                size_t previousSampleAddLagPos = previousSamplesAddPos + previousSamplesMax - lag; // 手前方向の自己相関
-                if (previousSampleAddLagPos >= previousSamplesMax) previousSampleAddLagPos -= previousSamplesMax;
-
-                lag_to_correlation[lag - lagMin] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSampleAddLagPos];
-                lag_to_correlation_double[lag - lagMin] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSampleAddLagPos];
+                if (previousSampleRemoveLagPos == 0) previousSampleRemoveLagPos = previousSamplesMax;
+                previousSampleRemoveLagPos--;
+                if (previousSampleRemoveDoubleLagPos == 0) previousSampleRemoveDoubleLagPos = previousSamplesMax;
+                previousSampleRemoveDoubleLagPos--;
+                if (previousSampleAddLagPos == 0) previousSampleAddLagPos = previousSamplesMax;
+                previousSampleAddLagPos--;
             }
 
+            previousSamplesDoubleRemovePos++;
+            if (previousSamplesDoubleRemovePos >= previousSamplesMax) previousSamplesDoubleRemovePos = 0;
             previousSamplesRemovePos++;
             if (previousSamplesRemovePos >= previousSamplesMax) previousSamplesRemovePos = 0;
             previousSamplesAddPos++;
@@ -160,27 +160,30 @@ static void on_process([[maybe_unused]] void *userdata) {
                 //prevLag = lagMin;
             } else { // 有効な音はピッチの検出を最後まで進めてリングバッファに格納する
                 float bestCorrelation = 0.0f;
-                size_t bestLag = 0;
+
+/*                size_t bestLag = 0;
                 size_t secondBesｔLag = lagMin;
                 size_t thirdBesｔLag = lagMin;
+*/
 
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-                    if (bestCorrelation < lag_to_correlation[lag - lagMin]) {
-                        bestCorrelation = lag_to_correlation[lag - lagMin];
-                        bestLag = lag;
+                    float corr = lag_to_correlation[lag - lagMin];
+                    if (bestCorrelation < corr) {
+                        bestCorrelation = corr;
+//                        bestLag = lag;
                     }
                 }
 
                 bool found = false;
-                float reBestCorrelation = 0.0, accurateBestCorration = 0.0;
+                float reBestCorrelation = 0.0, accurateBestCorrelation = 0.0;
                 newPitch = 0.0;
-                size_t reBestLag =0, newBestLag = 0;
+                size_t reBestLag =0/*, newBestLag = 0*/;
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-
-                    if (bestCorrelation * 0.8 < lag_to_correlation[lag - lagMin]) {
+                    float corr = lag_to_correlation[lag - lagMin];
+                    if (bestCorrelation * 0.8 < corr) {
                         found = true;
-                        if (reBestCorrelation < lag_to_correlation[lag - lagMin]) {
-                            reBestCorrelation = lag_to_correlation[lag - lagMin];
+                        if (reBestCorrelation < corr) {
+                            reBestCorrelation = corr;
                             reBestLag = lag;
                         }
                     } else if (found) {
@@ -189,12 +192,12 @@ static void on_process([[maybe_unused]] void *userdata) {
                             // x = (y2-y0) / (2*(2*y1 - y0 - y2))
                             // y = y1 + (y2-y0)**2 / (8 * (2*y1 - y0 - y2))
                             double y0 = lag_to_correlation[reBestLag - lagMin - 1],
-                                   y1 = lag_to_correlation[reBestLag - lagMin],
+                                   y1 = corr,
                                    y2 = lag_to_correlation[reBestLag - lagMin + 1];
-                            float tAccurateBestCorration = y1 + sqr(y2-y0) / (8 * (2*y1 - y0 - y2));
+                            float tAccurateBestCorrelation = y1 + sqr(y2-y0) / (8 * (2*y1 - y0 - y2));
 
-                            if (accurateBestCorration < tAccurateBestCorration) {
-                                accurateBestCorration = tAccurateBestCorration;
+                            if (accurateBestCorrelation < tAccurateBestCorrelation) {
+                                accurateBestCorrelation = tAccurateBestCorrelation;
 //                                newBestLag = reBestLag + (y2-y0) / (2*(2*y1 - y0 - y2));
 //                                newPitch = log2(sampleRate / newBestLag / baseFrequency) / log2(maxDisplayPitch / baseFrequency);
                                 newPitch = lag_to_y[reBestLag - lagMin]; // 横着する
@@ -223,26 +226,29 @@ static void on_process([[maybe_unused]] void *userdata) {
 
                 float newPitch2 = 0.0f;
                 bestCorrelation = 0.0f;
-                bestLag = 0;
+
+/*                bestLag = 0;
                 secondBesｔLag = lagMin;
                 thirdBesｔLag = lagMin;
+*/
 
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-                    if (bestCorrelation < lag_to_correlation_double[lag - lagMin]) {
-                        bestCorrelation = lag_to_correlation_double[lag - lagMin];
-                        bestLag = lag;
+                    float corr = lag_to_correlation_double[lag - lagMin];
+                    if (bestCorrelation < corr) {
+                        bestCorrelation = corr;
+//                        bestLag = lag;
                     }
                 }
 
                 found = false;
-                reBestCorrelation = 0.0, accurateBestCorration = 0.0;
-                reBestLag =0, newBestLag = 0;
+                reBestCorrelation = 0.0, accurateBestCorrelation = 0.0;
+                reBestLag =0/*, newBestLag = 0*/;
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-
-                    if (bestCorrelation * 0.8 < lag_to_correlation_double[lag - lagMin]) {
+                    float corr = lag_to_correlation_double[lag - lagMin];
+                    if (bestCorrelation * 0.8 < corr) {
                         found = true;
-                        if (reBestCorrelation < lag_to_correlation_double[lag - lagMin]) {
-                            reBestCorrelation = lag_to_correlation_double[lag - lagMin];
+                        if (reBestCorrelation < corr) {
+                            reBestCorrelation = corr;
                             reBestLag = lag;
                         }
                     } else if (found) {
@@ -251,12 +257,12 @@ static void on_process([[maybe_unused]] void *userdata) {
                             // x = (y2-y0) / (2*(2*y1 - y0 - y2))
                             // y = y1 + (y2-y0)**2 / (8 * (2*y1 - y0 - y2))
                             double y0 = lag_to_correlation_double[reBestLag - lagMin - 1],
-                                   y1 = lag_to_correlation_double[reBestLag - lagMin],
+                                   y1 = corr,
                                    y2 = lag_to_correlation_double[reBestLag - lagMin + 1];
-                            float tAccurateBestCorration = y1 + sqr(y2-y0) / (8 * (2*y1 - y0 - y2));
+                            float tAccurateBestCorrelation = y1 + sqr(y2-y0) / (8 * (2*y1 - y0 - y2));
 
-                            if (accurateBestCorration < tAccurateBestCorration) {
-                                accurateBestCorration = tAccurateBestCorration;
+                            if (accurateBestCorrelation < tAccurateBestCorrelation) {
+                                accurateBestCorrelation = tAccurateBestCorrelation;
 //                                newBestLag = reBestLag + (y2-y0) / (2*(2*y1 - y0 - y2));
 //                                newPitch2 = log2(sampleRate / newBestLag / baseFrequency) / log2(maxDisplayPitch / baseFrequency);
                                 newPitch2 = lag_to_y[reBestLag - lagMin]; // 横着する

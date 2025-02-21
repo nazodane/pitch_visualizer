@@ -107,8 +107,8 @@ static void on_process([[maybe_unused]] void *userdata) {
         size_t size = d->chunk->size;
         size_t numSamples = size / sizeof(float);
         float* audioData = (float*)((uint8_t*)d->data + offset);
-        double lag_to_sum[lagMax - lagMin + 1] = {0.0f};
-        lag_to_sum[0] = 1.0; // https://marui.hatenablog.com/entry/2021/12/25/070000
+        double lag_to_rss_sum[lagMax - lagMin + 1] = {0.0f};
+        lag_to_rss_sum[0] = 1.0; // https://marui.hatenablog.com/entry/2021/12/25/070000
 
 
 /*        if (previousSamplesLen < numSamples){ // 例えばnumSamples=940と941が交互に来る
@@ -152,7 +152,7 @@ static void on_process([[maybe_unused]] void *userdata) {
                 if (previousSampleAddLagPos >= previousSamplesMax) previousSampleAddLagPos -= previousSamplesMax;
 
                 lag_to_rss[lag - lagMin] += sqr((double)previousSamples[previousSamplesAddPos] - previousSamples[previousSampleAddLagPos]);
-                lag_to_sum[lag - lagMin + 1] = lag_to_sum[lag - lagMin] + lag_to_rss[lag - lagMin];
+                lag_to_rss_sum[lag - lagMin + 1] = lag_to_rss_sum[lag - lagMin] + lag_to_rss[lag - lagMin];
 
                 lag_to_rss_double[lag - lagMin] += sqr((double)previousSamples[previousSamplesAddPos] - previousSamples[previousSampleAddLagPos]);
             }
@@ -174,7 +174,7 @@ static void on_process([[maybe_unused]] void *userdata) {
 
                 double dd[lagMax - lagMin] = {0.0};
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
-                    dd[lag - lagMin] = lag_to_rss[lag - lagMin] / (lag_to_sum[lag - lagMin + 1] / (lag - lagMin + 1));
+                    dd[lag - lagMin] = lag_to_rss[lag - lagMin] / (lag_to_rss_sum[lag - lagMin + 1] / (lag - lagMin + 1));
                 }
 
                 for (size_t lag = lagMin; lag < lagMax; lag++) {

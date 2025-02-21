@@ -20,7 +20,7 @@ make
 ## Implementation Notes
 * Written in C++ (not Python)
 * Realtime
-* Zero-delay dual-window autocorrelation with dip interpolation
+* Tiny delay dual-window autocorrelation with dip interpolation
 * Draw multiple lines at once
 * Pitch range is from 55Hz (A1) to 880Hz (A6)
 

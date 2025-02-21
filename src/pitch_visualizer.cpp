@@ -186,27 +186,24 @@ static void on_process([[maybe_unused]] void *userdata) {
                     } else if (found) {
                         if (reBestLag-1 >= lagMin && reBestLag+1 < lagMax) {
                             // 二次曲線による補間
-                            // x = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1])
-                            // y = y[0] - (4*y[1] - 3*y[0] - y[2])**2 / 8*(y[2]+y[0]-2*y[1])
+                            // x = (y2-y0) / (2*(2*y1 - y0 - y2))
+                            // y = y1 + (y2-y0)**2 / (8 * (2*y1 - y0 - y2))
                             double y0 = lag_to_correlation[reBestLag - lagMin - 1],
                                    y1 = lag_to_correlation[reBestLag - lagMin],
                                    y2 = lag_to_correlation[reBestLag - lagMin + 1];
-                            float tAccurateBestCorration = y0 - sqr(4*y1 - 3*y0 - y2) / (8*(y2+y0-2*y1));
+                            float tAccurateBestCorration = y1 + sqr(y2-y0) / (8 * (2*y1 - y0 - y2));
 
                             if (accurateBestCorration < tAccurateBestCorration) {
                                 accurateBestCorration = tAccurateBestCorration;
-                                newBestLag = reBestLag; // 横着
-//                                float tNewLag = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1]);
-//                                newPitch = LAG_TO_PITCH(tNewLag);
+//                                newBestLag = reBestLag + (y2-y0) / (2*(2*y1 - y0 - y2));
+//                                newPitch = log2(sampleRate / newBestLag / baseFrequency) / log2(maxDisplayPitch / baseFrequency);
+                                newPitch = lag_to_y[reBestLag - lagMin]; // 横着する
                             }
                         }
                         found = false;
                         reBestCorrelation = FLT_MAX;
                     }
                 }
-
-
-                newPitch = lag_to_y[newBestLag - lagMin]; //std::log2(bestLag);
 
 /*
                 if (std::abs(lag_to_y[secondBesｔLag - lagMin] - newPitch) > 0.025)
@@ -224,7 +221,7 @@ static void on_process([[maybe_unused]] void *userdata) {
                     newPitch = -1.0f;
 */
 
-
+                float newPitch2 = 0.0f;
                 bestCorrelation = 0.0f;
                 bestLag = 0;
                 secondBesｔLag = lagMin;
@@ -251,18 +248,18 @@ static void on_process([[maybe_unused]] void *userdata) {
                     } else if (found) {
                         if (reBestLag-1 >= lagMin && reBestLag+1 < lagMax) {
                             // 二次曲線による補間
-                            // x = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1])
-                            // y = y[0] - (4*y[1] - 3*y[0] - y[2])**2 / 8*(y[2]+y[0]-2*y[1])
+                            // x = (y2-y0) / (2*(2*y1 - y0 - y2))
+                            // y = y1 + (y2-y0)**2 / (8 * (2*y1 - y0 - y2))
                             double y0 = lag_to_correlation_double[reBestLag - lagMin - 1],
                                    y1 = lag_to_correlation_double[reBestLag - lagMin],
                                    y2 = lag_to_correlation_double[reBestLag - lagMin + 1];
-                            float tAccurateBestCorration = y0 - sqr(4*y1 - 3*y0 - y2) / (8*(y2+y0-2*y1));
+                            float tAccurateBestCorration = y1 + sqr(y2-y0) / (8 * (2*y1 - y0 - y2));
 
                             if (accurateBestCorration < tAccurateBestCorration) {
                                 accurateBestCorration = tAccurateBestCorration;
-                                newBestLag = reBestLag; // 横着
-//                                float tNewLag = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1]);
-//                                newPitch = LAG_TO_PITCH(tNewLag);
+//                                newBestLag = reBestLag + (y2-y0) / (2*(2*y1 - y0 - y2));
+//                                newPitch2 = log2(sampleRate / newBestLag / baseFrequency) / log2(maxDisplayPitch / baseFrequency);
+                                newPitch2 = lag_to_y[reBestLag - lagMin]; // 横着する
                             }
                         }
                         found = false;
@@ -271,7 +268,6 @@ static void on_process([[maybe_unused]] void *userdata) {
                 }
 
 
-                float newPitch2 = lag_to_y[newBestLag - lagMin]; //std::log2(bestLag);
 /*
                 if (std::abs(lag_to_y[secondBesｔLag - lagMin] - newPitch) > 0.025)
                     newPitch2 = -1.0f;
@@ -408,7 +404,13 @@ void createShaderProgram() {
 
 void framebuffer_size_callback([[maybe_unused]] GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);  // OpenGLのビューポートを更新
+
+//    int fbWidth, fbHeight;
+//    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+
     std::cout << "Window resized: " << width << " x " << height << std::endl;
+
+//    std::cout << "fbsize: " << fbWidth << " x " << fbHeight << std::endl;
 }
 
 // ウインドウ関係
@@ -461,6 +463,14 @@ void initOpenGL(GLFWwindow** window) {
         std::cerr << "GLEW initialization failed. exit." << std::endl;
         exit(EXIT_FAILURE);
     }
+
+/*
+    // 線のスムーシングを有効にする
+    glEnable(GL_LINE_SMOOTH);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+*/
 
     glfwSetFramebufferSizeCallback(*window, framebuffer_size_callback); // ウインドウリサイズのコールバックを登録
     glfwSetKeyCallback(*window, key_callback); // キー入力のコールバックを登録

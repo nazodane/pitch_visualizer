@@ -63,7 +63,9 @@ double lag_to_correlation[lagMax - lagMin] = {0.0}; // lagMax幅で取った自�
 double lag_to_correlation_double[lagMax - lagMin] = {0.0}; // lagMax*2幅で取った自己相関
 
 // 過去のサンプルを保持するためのリングバッファ
-const size_t previousSamplesMax = lagMax + lagMax + lagMax;
+const size_t previousSamplesBase = ceil(log2(lagMax + lagMax + lagMax));
+const size_t previousSamplesMax = 2 << previousSamplesBase; // 2**base
+const size_t previousSamplesMask = previousSamplesMax - 1;
 float previousSamples[previousSamplesMax] = {0.0}; // 55Hzのサンプルの2倍幅ずらしに対応
 size_t previousSamplesDoubleRemovePos = 0;
 size_t previousSamplesRemovePos = lagMax;
@@ -123,12 +125,9 @@ static void on_process([[maybe_unused]] void *userdata) {
             rmsSQ -= (double)previousSamples[previousSamplesRemovePos] * previousSamples[previousSamplesRemovePos];
             rmsSQ += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSamplesAddPos];
 
-            size_t previousSampleRemoveLagPos = previousSamplesRemovePos + previousSamplesMax - lagMin;
-            if (previousSampleRemoveLagPos >= previousSamplesMax) previousSampleRemoveLagPos -= previousSamplesMax;
-            size_t previousSampleRemoveDoubleLagPos = previousSamplesDoubleRemovePos + previousSamplesMax - lagMin;
-            if (previousSampleRemoveDoubleLagPos >= previousSamplesMax) previousSampleRemoveDoubleLagPos -= previousSamplesMax;
-            size_t previousSampleAddLagPos = previousSamplesAddPos + previousSamplesMax - lagMin;
-            if (previousSampleAddLagPos >= previousSamplesMax) previousSampleAddLagPos -= previousSamplesMax;
+            size_t previousSampleRemoveLagPos = (previousSamplesRemovePos - lagMin) & previousSamplesMask;
+            size_t previousSampleRemoveDoubleLagPos = (previousSamplesDoubleRemovePos - lagMin) & previousSamplesMask;
+            size_t previousSampleAddLagPos = (previousSamplesAddPos - lagMin) & previousSamplesMask;
 
             // RMS振幅の計算と自己相関法によるピッチ検出
 //            for (size_t lag = lagMin; lag < lagMax; lag++) {
@@ -139,20 +138,14 @@ static void on_process([[maybe_unused]] void *userdata) {
                 lag_to_correlation[/*lag - lagMin*/idx] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSampleAddLagPos];
                 lag_to_correlation_double[/*lag - lagMin*/idx] += (double)previousSamples[previousSamplesAddPos] * previousSamples[previousSampleAddLagPos];
 
-                if (previousSampleRemoveLagPos == 0) previousSampleRemoveLagPos = previousSamplesMax;
-                previousSampleRemoveLagPos--;
-                if (previousSampleRemoveDoubleLagPos == 0) previousSampleRemoveDoubleLagPos = previousSamplesMax;
-                previousSampleRemoveDoubleLagPos--;
-                if (previousSampleAddLagPos == 0) previousSampleAddLagPos = previousSamplesMax;
-                previousSampleAddLagPos--;
+                previousSampleRemoveLagPos = (previousSampleRemoveLagPos - 1) & previousSamplesMask;
+                previousSampleRemoveDoubleLagPos = (previousSampleRemoveDoubleLagPos - 1) & previousSamplesMask;
+                previousSampleAddLagPos = (previousSampleAddLagPos - 1) & previousSamplesMask;
             }
 
-            previousSamplesDoubleRemovePos++;
-            if (previousSamplesDoubleRemovePos >= previousSamplesMax) previousSamplesDoubleRemovePos = 0;
-            previousSamplesRemovePos++;
-            if (previousSamplesRemovePos >= previousSamplesMax) previousSamplesRemovePos = 0;
-            previousSamplesAddPos++;
-            if (previousSamplesAddPos >= previousSamplesMax) previousSamplesAddPos = 0;
+            previousSamplesDoubleRemovePos = (previousSamplesDoubleRemovePos + 1) & previousSamplesMask;
+            previousSamplesRemovePos = (previousSamplesRemovePos + 1) & previousSamplesMask;
+            previousSamplesAddPos = (previousSamplesAddPos + 1) & previousSamplesMask;
 
             if (rmsSQ < amplitudeThreshold * amplitudeThreshold * lagMax) { // 小さい音のピッチは無視してリングバッファに-1を格納する
                 currentPitchRing[currentPitchWriteIndex] = -1;

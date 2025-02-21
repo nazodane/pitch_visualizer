@@ -80,6 +80,11 @@ float calculateNoteFrequency(float baseFrequency, int semitoneOffset) {
     return baseFrequency * std::pow(2.0f, semitoneOffset / 12.0f);
 }
 
+double sqr(double x){
+    return x*x;
+}
+#include <cfloat>
+
 // ピッチを計算
 static void on_process([[maybe_unused]] void *userdata) {
     struct pw_stream *stream = g_stream;
@@ -167,21 +172,41 @@ static void on_process([[maybe_unused]] void *userdata) {
                 }
 
                 bool found = false;
-                size_t reBestCorrelation = 0.0f;
+                float reBestCorrelation = 0.0, accurateBestCorration = 0.0;
+                newPitch = 0.0;
+                size_t reBestLag =0, newBestLag = 0;
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
+
                     if (bestCorrelation * 0.8 < lag_to_correlation[lag - lagMin]) {
                         found = true;
                         if (reBestCorrelation < lag_to_correlation[lag - lagMin]) {
                             reBestCorrelation = lag_to_correlation[lag - lagMin];
-                            thirdBesｔLag = secondBesｔLag;
-                            secondBesｔLag = bestLag;
-                            bestLag = lag;
+                            reBestLag = lag;
                         }
-                    } else if (found) break;
+                    } else if (found) {
+                        if (reBestLag-1 >= lagMin && reBestLag+1 < lagMax) {
+                            // 二次曲線による補間
+                            // x = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1])
+                            // y = y[0] - (4*y[1] - 3*y[0] - y[2])**2 / 8*(y[2]+y[0]-2*y[1])
+                            double y0 = lag_to_correlation[reBestLag - lagMin - 1],
+                                   y1 = lag_to_correlation[reBestLag - lagMin],
+                                   y2 = lag_to_correlation[reBestLag - lagMin + 1];
+                            float tAccurateBestCorration = y0 - sqr(4*y1 - 3*y0 - y2) / (8*(y2+y0-2*y1));
+
+                            if (accurateBestCorration < tAccurateBestCorration) {
+                                accurateBestCorration = tAccurateBestCorration;
+                                newBestLag = reBestLag; // 横着
+//                                float tNewLag = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1]);
+//                                newPitch = LAG_TO_PITCH(tNewLag);
+                            }
+                        }
+                        found = false;
+                        reBestCorrelation = FLT_MAX;
+                    }
                 }
 
 
-                newPitch = lag_to_y[bestLag - lagMin]; //std::log2(bestLag);
+                newPitch = lag_to_y[newBestLag - lagMin]; //std::log2(bestLag);
 
 /*
                 if (std::abs(lag_to_y[secondBesｔLag - lagMin] - newPitch) > 0.025)
@@ -213,29 +238,48 @@ static void on_process([[maybe_unused]] void *userdata) {
                 }
 
                 found = false;
-                reBestCorrelation = 0.0f;
+                reBestCorrelation = 0.0, accurateBestCorration = 0.0;
+                reBestLag =0, newBestLag = 0;
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
+
                     if (bestCorrelation * 0.8 < lag_to_correlation_double[lag - lagMin]) {
                         found = true;
                         if (reBestCorrelation < lag_to_correlation_double[lag - lagMin]) {
                             reBestCorrelation = lag_to_correlation_double[lag - lagMin];
-                            thirdBesｔLag = secondBesｔLag;
-                            secondBesｔLag = bestLag;
-                            bestLag = lag;
+                            reBestLag = lag;
                         }
-                    } else if (found) break;
+                    } else if (found) {
+                        if (reBestLag-1 >= lagMin && reBestLag+1 < lagMax) {
+                            // 二次曲線による補間
+                            // x = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1])
+                            // y = y[0] - (4*y[1] - 3*y[0] - y[2])**2 / 8*(y[2]+y[0]-2*y[1])
+                            double y0 = lag_to_correlation_double[reBestLag - lagMin - 1],
+                                   y1 = lag_to_correlation_double[reBestLag - lagMin],
+                                   y2 = lag_to_correlation_double[reBestLag - lagMin + 1];
+                            float tAccurateBestCorration = y0 - sqr(4*y1 - 3*y0 - y2) / (8*(y2+y0-2*y1));
+
+                            if (accurateBestCorration < tAccurateBestCorration) {
+                                accurateBestCorration = tAccurateBestCorration;
+                                newBestLag = reBestLag; // 横着
+//                                float tNewLag = (3*y[0] + y[2] - 4*y[1]) / 2*(y[2]+y[0]-2*y[1]);
+//                                newPitch = LAG_TO_PITCH(tNewLag);
+                            }
+                        }
+                        found = false;
+                        reBestCorrelation = FLT_MAX;
+                    }
                 }
 
 
-                float newPitch2 = lag_to_y[bestLag - lagMin]; //std::log2(bestLag);
-
+                float newPitch2 = lag_to_y[newBestLag - lagMin]; //std::log2(bestLag);
+/*
                 if (std::abs(lag_to_y[secondBesｔLag - lagMin] - newPitch) > 0.025)
                     newPitch2 = -1.0f;
                 if (std::abs(lag_to_y[thirdBesｔLag - lagMin] - newPitch) > 0.025)
                     newPitch2 = -1.0f;
                 if (std::abs(lag_to_y[thirdBesｔLag - lagMin] - lag_to_y[secondBesｔLag - lagMin]) > 0.025)
                     newPitch2 = -1.0f;
-
+*/
                 if (std::abs(newPitch - newPitch2) > 0.025)
                     newPitch2 = -1.0f;
 

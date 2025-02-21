@@ -19,10 +19,10 @@ make
 
 ## Implementation Notes
 * Written in C++ (not Python)
-* Pitch range is from 55Hz (A1) to 880Hz (A6)
-* non-FFT-based Autocorrelation (rough)
-* Draw multiple lines at once
 * Realtime
+* Zero-delay dual-window autocorrelation with dip interpolation
+* Draw multiple lines at once
+* Pitch range is from 55Hz (A1) to 880Hz (A6)
 
 ## Screenshot
 ![Screenshot of the Vocal Pitch Visualizer](screenshot.png)

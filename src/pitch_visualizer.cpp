@@ -17,6 +17,8 @@
 #include <cmath>
 #include <cassert>
 
+#include <queue>
+
 #ifdef ENABLE_REALTIME
 #include <sys/mman.h>
 #include <sys/capability.h>
@@ -39,7 +41,7 @@ const float sampleRate = 48000.0f;
 #define SMPLING_RATE_STR "48000"
 
 // 量子化
-#define QUANTUM_STR "32"
+#define QUANTUM_STR "256"
 
 // 表示用の上限ピッチ（Hz） 
 const float maxDisplayPitch = 880.000f; // A6 の周波数
@@ -77,6 +79,17 @@ double rmsSQ = 0.0f;
 const float amplitudeThreshold = 0.005f; // 小さな音の閾値
 float newPitch = 0.0f;
 
+const size_t codebookMax = 1 << 5;
+const size_t codebookMask = codebookMax - 1;
+
+size_t codebookIndex = 0;
+struct code_t {
+    size_t size;
+    float data[lagMax];
+};
+
+struct code_t codebook[codebookMax] = {};
+
 
 // baseFrequency を基に全音と半音を算出
 float calculateNoteFrequency(float baseFrequency, int semitoneOffset) {
@@ -86,7 +99,76 @@ float calculateNoteFrequency(float baseFrequency, int semitoneOffset) {
 double sqr(double x){
     return x*x;
 }
+
+class MedianFinder {
+    using MinPQ = std::priority_queue<double, std::vector<double>, std::greater<double>>;
+    using MaxPQ = std::priority_queue<double, std::vector<double>>;
+
+    std::vector<double> bufLow;
+    std::vector<double> bufHigh;
+
+    MaxPQ low;
+    MinPQ high;
+
+    size_t cap;
+
+public:
+    explicit MedianFinder(){
+    }
+
+    explicit MedianFinder(size_t n) : cap(n) {
+        // 事前確保（重要）
+        bufLow.reserve(n);
+        bufHigh.reserve(n);
+
+        low = MaxPQ(std::less<double>(), std::move(bufLow));
+        high = MinPQ(std::greater<double>(), std::move(bufHigh));
+    }
+
+    void add(double x) {
+        if (low.empty() || x <= low.top()) {
+            low.push(x);
+        } else {
+            high.push(x);
+        }
+
+        // バランス維持
+        if (low.size() > high.size() + 1) {
+            high.push(low.top());
+            low.pop();
+        }
+        else if (high.size() > low.size()) {
+            low.push(high.top());
+            high.pop();
+        }
+    }
+
+    double median() const {
+        if (low.empty()) throw std::runtime_error("empty");
+
+        if (low.size() > high.size()) {
+            return low.top();
+        }
+        return (low.top() + high.top()) / 2.0;
+    }
+
+    size_t size() const {
+        return low.size() + high.size();
+    }
+
+    void clear() {
+        bufLow.clear();
+        bufHigh.clear();
+
+        // priority_queueも中身リセット（再構築）
+        low = MaxPQ(std::less<double>(), bufLow);
+        high = MinPQ(std::greater<double>(), bufHigh);
+    }
+};
+
+
 #include <cfloat>
+
 
 // ピッチを計算
 static void on_process([[maybe_unused]] void *userdata) {
@@ -143,9 +225,6 @@ static void on_process([[maybe_unused]] void *userdata) {
                 previousSampleAddLagPos = (previousSampleAddLagPos - 1) & previousSamplesMask;
             }
 
-            previousSamplesDoubleRemovePos = (previousSamplesDoubleRemovePos + 1) & previousSamplesMask;
-            previousSamplesRemovePos = (previousSamplesRemovePos + 1) & previousSamplesMask;
-            previousSamplesAddPos = (previousSamplesAddPos + 1) & previousSamplesMask;
 
             if (rmsSQ < amplitudeThreshold * amplitudeThreshold * lagMax) { // 小さい音のピッチは無視してリングバッファに-1を格納する
                 currentPitchRing[currentPitchWriteIndex] = -1;
@@ -236,6 +315,7 @@ static void on_process([[maybe_unused]] void *userdata) {
                 found = false;
                 reBestCorrelation = 0.0, accurateBestCorrelation = 0.0;
                 reBestLag =0/*, newBestLag = 0*/;
+                struct code_t best_code = {};
                 for (size_t lag = lagMin; lag < lagMax; lag++) {
                     float corr = lag_to_correlation_double[lag - lagMin];
                     if (bestCorrelation * 0.8 < corr) {
@@ -259,6 +339,12 @@ static void on_process([[maybe_unused]] void *userdata) {
 //                                newBestLag = reBestLag + (y2-y0) / (2*(2*y1 - y0 - y2));
 //                                newPitch2 = log2(sampleRate / newBestLag / baseFrequency) / log2(maxDisplayPitch / baseFrequency);
                                 newPitch2 = lag_to_y[reBestLag - lagMin]; // 横着する
+                                best_code.size = reBestLag;
+                                size_t pos = previousSamplesAddPos;
+                                for (size_t idx = 0; idx < reBestLag; idx++) {
+                                    best_code.data[idx] = previousSamples[pos];
+                                    pos = (pos - 1) & previousSamplesMask;
+                                }
                             }
                         }
                         found = false;
@@ -275,8 +361,61 @@ static void on_process([[maybe_unused]] void *userdata) {
                 if (std::abs(lag_to_y[thirdBesｔLag - lagMin] - lag_to_y[secondBesｔLag - lagMin]) > 0.025)
                     newPitch2 = -1.0f;
 */
-                if (std::abs(newPitch - newPitch2) > 0.025)
+                if (std::abs(newPitch - newPitch2) > 0.025) {
+
                     newPitch2 = -1.0f;
+
+                    float prevNewPitch2 = newPitch2;
+                    bestCorrelation = 0.0;
+
+                    static MedianFinder mf;
+
+                    static bool initialized = false;
+                    if (!initialized) {
+                        mf = MedianFinder(lagMax);
+                        initialized = true;
+                    }
+                    mf.clear();
+
+                    // コードブックから検索する⇢うーん、微妙・・・
+                    // そも大量にコードブックができて捨てられる。枝切が必要？それでも微妙？
+                    // 他のアイデア: アフィン変換、ノイズ除去、
+                    for (size_t idx = 0; idx < codebookMax; idx++) {
+                        if (!codebook[idx].size) continue;
+                        double corr = 0.0;
+                        size_t pos = previousSamplesAddPos;
+                        for (size_t idx2 = 0; idx2 < codebook[idx].size; idx2++) {
+                            // Student-t自己相関
+                            double diff = (double)codebook[idx].data[idx2] - previousSamples[pos];
+                            mf.add(diff * diff);
+
+                            pos = (pos - 1) & previousSamplesMask;
+                        }
+                        double sigma2 = mf.median();
+                        for (size_t idx2 = 0; idx2 < codebook[idx].size; idx2++) {
+                            double diff = (double)codebook[idx].data[idx2] - previousSamples[pos];
+                            const double nu = 2.0;
+                            double w = (nu + 1.0) / (nu * sigma2 + diff*diff);
+                            corr = w * codebook[idx].data[idx2] * previousSamples[pos]; // R_tau
+
+                            pos = (pos - 1) & previousSamplesMask;
+                        }
+
+                        if (bestCorrelation < corr) {
+                            bestCorrelation = corr;
+                            reBestLag = codebook[idx].size;
+                        }
+                    }
+                    newPitch2 = lag_to_y[reBestLag - lagMin];/*
+                    if (std::abs(newPitch2 - prevNewPitch2) > 0.025) {
+                        newPitch2 = -1;
+                    }*/
+
+                } else if (newPitch2 > 0.0){
+                    // コードブックを登録
+                    codebook[codebookIndex] = best_code;
+                    codebookIndex = (codebookIndex + 1) & codebookMask;
+                }
 
                 currentPitchRing[currentPitchWriteIndex] = newPitch2;
 
@@ -286,6 +425,11 @@ static void on_process([[maybe_unused]] void *userdata) {
 
 
             }
+
+            previousSamplesDoubleRemovePos = (previousSamplesDoubleRemovePos + 1) & previousSamplesMask;
+            previousSamplesRemovePos = (previousSamplesRemovePos + 1) & previousSamplesMask;
+            previousSamplesAddPos = (previousSamplesAddPos + 1) & previousSamplesMask;
+
             size_t newWriteIndex = currentPitchWriteIndex.load(std::memory_order_relaxed) + 1;
             if (newWriteIndex >= (size_t)sampleRate)
                 newWriteIndex -= (size_t)sampleRate;

@@ -100,72 +100,65 @@ double sqr(double x){
     return x*x;
 }
 
-class MedianFinder {
-    using MinPQ = std::priority_queue<double, std::vector<double>, std::greater<double>>;
-    using MaxPQ = std::priority_queue<double, std::vector<double>>;
 
-    std::vector<double> bufLow;
-    std::vector<double> bufHigh;
+#include <vector>
+#include <numeric>
+#include <algorithm>
+#include <stdio.h>
+#include <float.h>
+#include <math.h>
+// Modified Chatterjee's rank correlation
+float modfied_chatterjee(float *x, float *y, size_t size) {
+    static std::vector<size_t> idx = {};
+    static size_t inner_size = 0;
+    if (inner_size != size) {
+        idx = std::vector<size_t>(size);
+        inner_size = size;
+    }
+    std::iota(idx.begin(), idx.end(), 0);
+    std::sort(idx.begin(), idx.end(),
+          [&](size_t a, size_t b) {
+              return x[a] < x[b];
+          });
 
-    MaxPQ low;
-    MinPQ high;
-
-    size_t cap;
-
-public:
-    explicit MedianFinder(){
+    if (size < 1) {
+        return 0.0;
     }
 
-    explicit MedianFinder(size_t n) : cap(n) {
-        // 事前確保（重要）
-        bufLow.reserve(n);
-        bufHigh.reserve(n);
-
-        low = MaxPQ(std::less<double>(), std::move(bufLow));
-        high = MinPQ(std::greater<double>(), std::move(bufHigh));
+#ifdef DEBUG
+    for (size_t i = 0; i < size; i++) {
+        printf("%f: %f\n", x[idx[i]], y[idx[i]]);
     }
+    printf("\n\n");
+#endif
 
-    void add(double x) {
-        if (low.empty() || x <= low.top()) {
-            low.push(x);
+    float prev_key = x[idx[0]];
+    float avg = y[idx[0]];
+    float prev_avg = 0.0;
+    size_t total = 0;
+    float diff_sum = 0.0;
+    // オリジナルのChatterjeeを改変して同順位は並列に処理
+    for (size_t i = 1; i < size; i++) {
+        float key = x[idx[i]];
+        float value = y[idx[i]];
+        if (fabsf(key - prev_key) < FLT_EPSILON) {
+            total += 1;
+            avg += (value - avg) / total; // 平均を逐次的に更新
         } else {
-            high.push(x);
+            total = 1;
+            prev_avg = avg;
+            avg = value;
         }
+#ifdef DEBUG
+        printf("%f\n", prev_avg);
+#endif
+        diff_sum += fabsf(value - prev_avg);
 
-        // バランス維持
-        if (low.size() > high.size() + 1) {
-            high.push(low.top());
-            low.pop();
-        }
-        else if (high.size() > low.size()) {
-            low.push(high.top());
-            high.pop();
-        }
+        prev_key = key;
     }
 
-    double median() const {
-        if (low.empty()) throw std::runtime_error("empty");
-
-        if (low.size() > high.size()) {
-            return low.top();
-        }
-        return (low.top() + high.top()) / 2.0;
-    }
-
-    size_t size() const {
-        return low.size() + high.size();
-    }
-
-    void clear() {
-        bufLow.clear();
-        bufHigh.clear();
-
-        // priority_queueも中身リセット（再構築）
-        low = MaxPQ(std::less<double>(), bufLow);
-        high = MinPQ(std::greater<double>(), bufHigh);
-    }
-};
-
+    return 1.0 - (3.0 * diff_sum) / (size * size - 1);
+}
 
 #include <cfloat>
 
@@ -365,17 +358,8 @@ static void on_process([[maybe_unused]] void *userdata) {
 
                     newPitch2 = -1.0f;
 
-                    float prevNewPitch2 = newPitch2;
+//                    float prevNewPitch2 = newPitch2;
                     bestCorrelation = 0.0;
-
-                    static MedianFinder mf;
-
-                    static bool initialized = false;
-                    if (!initialized) {
-                        mf = MedianFinder(lagMax);
-                        initialized = true;
-                    }
-                    mf.clear();
 
                     // コードブックから検索する⇢うーん、微妙・・・
                     // そも大量にコードブックができて捨てられる。枝切が必要？それでも微妙？
@@ -384,22 +368,13 @@ static void on_process([[maybe_unused]] void *userdata) {
                         if (!codebook[idx].size) continue;
                         double corr = 0.0;
                         size_t pos = previousSamplesAddPos;
+                        static float tmp[lagMax]; // あんまり効率的じゃないけど。
                         for (size_t idx2 = 0; idx2 < codebook[idx].size; idx2++) {
-                            // Student-t自己相関
-                            double diff = (double)codebook[idx].data[idx2] - previousSamples[pos];
-                            mf.add(diff * diff);
-
+                            tmp[idx2] = previousSamples[pos];
                             pos = (pos - 1) & previousSamplesMask;
                         }
-                        double sigma2 = mf.median();
-                        for (size_t idx2 = 0; idx2 < codebook[idx].size; idx2++) {
-                            double diff = (double)codebook[idx].data[idx2] - previousSamples[pos];
-                            const double nu = 2.0;
-                            double w = (nu + 1.0) / (nu * sigma2 + diff*diff);
-                            corr = w * codebook[idx].data[idx2] * previousSamples[pos]; // R_tau
-
-                            pos = (pos - 1) & previousSamplesMask;
-                        }
+                        
+                        corr = modfied_chatterjee(tmp, codebook[idx].data, codebook[idx].size);
 
                         if (bestCorrelation < corr) {
                             bestCorrelation = corr;
